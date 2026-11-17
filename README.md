@@ -41,3 +41,19 @@ Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including 
 The bottom of the screen is kept clear, without footer text.
 
 Menu rows are compact (38-pixel spacing) to leave room for additional entries. Interface text uses smooth glyphs close to the original size, with centered headings and safe screen margins.
+
+## Automatic builds and releases
+
+GitHub Actions tests and builds each push to `main` and every pull request. Download the **q2-utilities-app-card-app** artifact from a successful run, or start a build with **Actions → q2-utilities-app → Run workflow**.
+
+Push an unused version tag to publish a release automatically:
+
+```sh
+git pull --ff-only
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+Once the build and package checks pass, Actions creates the release and attaches **utilities.zip** directly. Re-running the tag build replaces that release's ZIP. Branch pushes and manual branch builds only save Actions artifacts.
+
+CI downloads the official Shanling V1.36 ZIP from its published Google Drive link, verifies the SHA-256 in `tools/mksysroot.sh`, and caches the extracted build sysroot. Firmware files are not included in the release ZIP.

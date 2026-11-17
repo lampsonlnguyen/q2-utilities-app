@@ -1,0 +1,71 @@
+name: Build and release q2-utilities-app
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld make gcc python3 python3-venv zip unzip file squashfs-tools curl binutils
+      - uses: actions/cache@v4
+        id: sysroot
+        with:
+          path: ~/.cache/q2/sysroot
+          key: q2-sysroot-v136-${{ runner.os }}-${{ hashFiles('tools/mksysroot.sh') }}
+      - name: Prepare Q2 sysroot
+        if: steps.sysroot.outputs.cache-hit != 'true'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/downloader"
+          "$RUNNER_TEMP/downloader/bin/pip" install gdown==5.2.0
+          "$RUNNER_TEMP/downloader/bin/gdown" 1HyST2-QkhUa6BdJP_ljBjkICxd-u8act -O "$RUNNER_TEMP/stock.zip"
+          bash tools/mksysroot.sh "$RUNNER_TEMP/stock.zip" "$HOME/.cache/q2/sysroot"
+      - name: Test and build
+        run: |
+          make check
+          make
+      - name: Verify install package
+        run: |
+          unzip -t dist/utilities.zip
+          unzip -p dist/utilities.zip .utilities/q2app | grep -Fx 'game=1'
+          file dist/.utilities/q2-utilities | grep -E 'ELF 32-bit LSB.*MIPS'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: q2-utilities-app-card-app
+          path: dist/utilities.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: q2-utilities-app-card-app
+          path: dist
+      - name: Publish release ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/utilities.zip --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/utilities.zip \
+              --verify-tag --generate-notes --title "$RELEASE_TAG"
+          fi
