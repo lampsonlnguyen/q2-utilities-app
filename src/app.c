@@ -575,6 +575,32 @@ static void draw_calendar(const struct app *app, uint32_t *pixels, unsigned stri
     }
 }
 
+/* Compact 3x5 capitals keep bottom hints clear of the rounded glass. */
+static void draw_footer(uint32_t *d,unsigned s,const char *str) {
+    static const unsigned char font[26][5]={
+        {2,5,7,5,5},{6,5,6,5,6},{3,4,4,4,3},{6,5,5,5,6},
+        {7,4,6,4,7},{7,4,6,4,4},{3,4,5,5,3},{5,5,7,5,5},
+        {7,2,2,2,7},{1,1,1,5,2},{5,5,6,5,5},{4,4,4,4,7},
+        {5,7,7,5,5},{5,7,7,7,5},{2,5,5,5,2},{6,5,6,4,4},
+        {2,5,5,3,1},{6,5,6,5,5},{3,4,2,1,6},{7,2,2,2,2},
+        {5,5,5,5,7},{5,5,5,5,2},{5,5,7,7,5},{5,5,2,5,5},
+        {5,5,2,2,2},{7,1,2,4,7}};
+    int n=0; while(str[n]) ++n;
+    int x=(WIDTH-(n*4-1))/2;
+    for (;*str;++str,x+=4) {
+        char c=*str;
+        if(c>='a' && c<='z') c-=32;
+        if(c==':') {
+            fill(d,s,x+1,294,1,1,MUTED);
+            fill(d,s,x+1,296,1,1,MUTED);
+        }
+        if (c<'A' || c>'Z') continue;
+        for (int y=0;y<5;++y)
+            for (int col=0;col<3;++col)
+                if (font[c-'A'][y]&(4>>col)) fill(d,s,x+col,293+y,1,1,MUTED);
+    }
+}
+
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, const struct tm *today)
 {
     struct layout layout;
@@ -640,6 +666,5 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
         else
             centered(pixels, stride, item->x, y, item->w, item->label, color);
     }
-    /* Move the controls up and right to clear the display’s rounded corners. */
-    centered(pixels, stride, 12, 289, WIDTH - 12, footer, MUTED);
+    draw_footer(pixels, stride, footer);
 }

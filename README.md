@@ -37,3 +37,5 @@ have a Q2 sysroot, run `make SYSROOT=/actual/sysroot/location`.
 ## Appearance
 
 Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including each theme’s accent and Light Mode. It reads `/mnt/data/config.ini` when opened; reopen Utilities after changing your theme. Auto Light Mode uses the device’s local clock (light from 07:00 to 19:00) and updates while the app is open. The interface uses lightweight flat fills rather than loading firmware theme artwork. Missing settings default to Minimal, Graphite, and dark mode.
+
+Bottom control hints and status messages use the same compact 3×5 font as Q2 Arcade, centered with space around the rounded screen edges.
