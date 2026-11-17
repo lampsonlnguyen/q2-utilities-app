@@ -8,7 +8,15 @@ CARD = dist/.utilities
 
 all: dist/utilities.zip
 
-build/q2/%.o: src/%.c src/app.h src/font.h
+check-sysroot:
+	@test -r "$(SYSROOT)/usr/include/time.h" && \
+		test -r "$(SYSROOT)/usr/include/mipsel-linux-gnu/gnu/stubs-o32_hard_2008.h" && \
+		test -r "$(SYSROOT)/lib/libc.so.6" && test -r "$(SYSROOT)/lib/libgcc_s.so.1" && \
+		test -r "$(SYSROOT)/lib/ld-linux-mipsn8.so.1" || { \
+		echo 'Q2 sysroot is incomplete at $(SYSROOT).' >&2; \
+		echo 'Run: bash tools/mksysroot.sh "Q2 Firmware V1.36.zip" "$(SYSROOT)"' >&2; exit 1; }
+
+build/q2/%.o: src/%.c src/app.h src/font.h | check-sysroot
 	mkdir -p $(@D)
 	$(Q2_CC) $(Q2_FLAGS) $(CFLAGS) -std=gnu11 -c $< -o $@
 
@@ -35,4 +43,4 @@ check: build/host/check
 clean:
 	rm -rf build dist
 
-.PHONY: all check clean
+.PHONY: all check clean check-sysroot

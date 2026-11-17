@@ -13,11 +13,17 @@ Turn the clickwheel to move the highlight and press Centre to select. You can al
 
 ## Build and install
 
-You need Clang, LLD, Make, zip, and the Shanling Q2 sysroot. Use [Rockbox's sysroot script](https://github.com/DiamondBond/q2-rockbox/blob/main/tools/shanlingq2/mksysroot.sh) with stock firmware **V1.32** to create it.
+On Ubuntu or WSL, install the build tools and create a sysroot from the
+original Shanling **Q2 Firmware V1.36 ZIP**.
 
 ```sh
-make SYSROOT=/path/to/q2-sysroot
+sudo apt install clang lld make binutils curl unzip squashfs-tools zip
+bash tools/mksysroot.sh "Q2 Firmware V1.36.zip" "$HOME/.cache/q2/sysroot"
+make
 ```
+
+Use the full path to the stock ZIP if it is outside the checkout. If you already
+have a Q2 sysroot, run `make SYSROOT=/actual/sysroot/location`.
 
 1. Extract `dist/utilities.zip` at the root of the SD card. The result should be `.utilities/q2-utilities` and `.utilities/q2app`. The leading dot may hide the folder in your file browser.
 2. Eject the card and open **Library → Games → Utilities** in a Q2 Pod build with card game support.
