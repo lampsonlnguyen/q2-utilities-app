@@ -52,7 +52,7 @@ static void calendar(void)
     send("w -9", 0);
     send("k u 218", 0);
     assert(app.screen == CALENDAR && app.year == 2024 && app.month == 1);
-    assert(pixels[220 * HEIGHT + HEIGHT - 1 - 199] == 0xff84ead1);
+    assert(pixels[220 * HEIGHT + HEIGHT - 1 - 199] == 0xffeeeeec);
     for (int i = 0; i < 10; ++i)
         tap(50, 252, 0);
     assert(app.year == 2023 && app.month == 3);
@@ -100,6 +100,23 @@ static void calculator(void)
     assert(app.quit);
 }
 
+static void theme(void)
+{
+    app.screen=HOME;
+    app.focus=0;
+    app_theme("[OTHER]\nLIGHT=0\n[IPOD]\r\nTHEME=2\r\nACCENT=4\r\nLIGHT=1\r\n", 12);
+    app_draw(&app,pixels,HEIGHT,0,&today);
+    assert(pixels[0]==0xfff4f4f4);
+    assert(pixels[20*HEIGHT+HEIGHT-1-58]==0xff2a6ad8);
+    app_theme("[IPOD]\nTHEME=1\nCLASSIC_LIGHT_ACCENT=0\nLIGHT=2\n",7);
+    app_draw(&app,pixels,HEIGHT,0,&today);
+    assert(pixels[0]==0xffffffff);
+    app_theme("[IPOD]\nLIGHT=2\n",19);
+    app_draw(&app,pixels,HEIGHT,0,&today);
+    assert(pixels[0]==0xff000000);
+    app_theme("",12);
+}
+
 int main(void)
 {
     char dir[] = "/tmp/q2-utilities-test.XXXXXX";
@@ -107,6 +124,7 @@ int main(void)
     char path[128];
     snprintf(path, sizeof path, "%s/tasks.tsv", dir);
     app_init(&app, path);
+    theme();
     stopwatch();
     calendar();
     tasks(path);

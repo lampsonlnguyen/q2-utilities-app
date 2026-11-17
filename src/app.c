@@ -8,7 +8,71 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { BG = 0x141b24, PANEL = 0x253344, INK = 0xf7fafc, MUTED = 0xaabbcc, ACCENT = 0x84ead1 };
+/* Q2 Pod theme IDs/accent colors: assets/themes and patch/offsets.inc. */
+static uint32_t BG=0, PANEL=0x191919, INK=0xeeeeec, MUTED=0x949294,
+                ACCENT=0xeeeeec, SELECT=0xeeeeec, SELECT_INK=0x161616;
+static int config_number(const char *config, const char *key, int fallback, int limit) {
+    int ipod=0;
+    while (*config) {
+        const char *end=config;
+        while (*end && *end!='\n') ++end;
+        const char *p=config;
+        while (p<end && (*p==' ' || *p=='\t')) ++p;
+        if (p<end && *p=='[') {
+            const char section[]="[IPOD]";
+            int i=0;
+            while (p+i<end && section[i] && p[i]==section[i]) ++i;
+            ipod=i==6;
+        } else if (ipod) {
+            int i=0;
+            while (p+i<end && key[i] && p[i]==key[i]) ++i;
+            if (!key[i]) {
+                p+=i;
+                while (p<end && (*p==' ' || *p=='\t')) ++p;
+                if (p<end && *p++=='=') {
+                    while (p<end && (*p==' ' || *p=='\t')) ++p;
+                    unsigned value=0; int digits=0;
+                    while (p<end && *p>='0' && *p<='9') {
+                        value=value*10+(unsigned)(*p++-'0');
+                        if (value>=(unsigned)limit) return fallback;
+                        digits=1;
+                    }
+                    if (digits && (p==end || *p=='\r' || *p==' ' || *p=='\t' || *p==';' || *p=='#'))
+                        return (int)value;
+                }
+            }
+        }
+        config=*end?end+1:end;
+    }
+    return fallback;
+}
+void app_theme(const char *config, int hour)
+{
+    static const uint32_t accents[]={0x424242,0xe8123f,0x13838d,0x8c732c,
+        0x2a6ad8,0xc45400,0x903868,0x424242,0x647f34};
+    static const uint32_t bright[]={0xd8d8d8,0xff1448,0x30929b,0x9a8446,
+        0x447cdd,0xcb681e,0x9d4f7a,0xd8d8d8,0x778e4c};
+    int theme=config_number(config,"THEME",0,3);
+    const char *key=theme==0?"MINIMAL_ACCENT":theme==1?"CLASSIC_LIGHT_ACCENT":"ACCENT";
+    int accent=config_number(config,key,0,9);
+    if(theme==1)
+        accent=accent==0?4:accent==8?8:accent-1;
+    else if(theme==2 && accent==7)
+        accent=0;
+    int mode=config_number(config,"LIGHT",0,3);
+    bool light=mode==1 || (mode==2 && hour>=7 && hour<19);
+    BG=light?(theme==1?0xffffff:0xf4f4f4):0;
+    PANEL=light?0xe7e7e7:0x191919;
+    INK=light?(theme==1?0:0x161616):0xeeeeec;
+    MUTED=light?0x606060:0x949294;
+    SELECT=accents[accent]; SELECT_INK=0xffffff;
+    ACCENT=light?accents[accent]:bright[accent];
+    if(theme==0 && (accent==0 || accent==7)) {
+        SELECT=light?0x161616:0xeeeeec;
+        ACCENT=INK; SELECT_INK=BG;
+    }
+}
+
 enum { RETURN_KEY = 170, CENTRE_KEY = 218, WHEEL_STEP = 9, TASKS_PER_PAGE = 5 };
 
 struct button {
@@ -505,9 +569,9 @@ static void draw_calendar(const struct app *app, uint32_t *pixels, unsigned stri
         int x = 19 + cell % 7 * 48, y = 96 + cell / 7 * 24;
         bool current = current_month && day == today->tm_mday;
         if (current)
-            fill(pixels, stride, x + 9, y, 30, 24, ACCENT);
+            fill(pixels, stride, x + 9, y, 30, 24, SELECT);
         snprintf(label, sizeof label, "%d", day);
-        centered(pixels, stride, x, y, 48, label, current ? BG : INK);
+        centered(pixels, stride, x, y, 48, label, current ? SELECT_INK : INK);
     }
 }
 
@@ -568,8 +632,8 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
     for (int i = 0; i < layout.count; ++i) {
         const struct button *item = &layout.items[i];
         bool selected = i == app->focus;
-        fill(pixels, stride, item->x, item->y, item->w, item->h, selected ? ACCENT : PANEL);
-        uint32_t color = selected ? BG : INK;
+        fill(pixels, stride, item->x, item->y, item->w, item->h, selected ? SELECT : PANEL);
+        uint32_t color = selected ? SELECT_INK : INK;
         int y = item->y + (item->h - F20_H) / 2;
         if (app->screen == HOME || (app->screen == TODO && item->code >= 0))
             draw_text_fitted(pixels, stride, item->x + 10, y, item->w - 20, item->label, color);

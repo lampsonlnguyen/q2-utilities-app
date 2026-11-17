@@ -35,6 +35,7 @@ struct app {
     char number[32];
 };
 
+void app_theme(const char *config, int hour);
 void app_init(struct app *app, const char *task_path);
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today);
 /* Draw an opaque frame into a portrait framebuffer. Stride is in pixels. */

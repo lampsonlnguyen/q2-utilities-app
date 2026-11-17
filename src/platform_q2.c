@@ -59,6 +59,19 @@ static int launch_error(const char *message)
     return 1;
 }
 
+static void load_theme(int hour)
+{
+    char config[16384];
+    size_t length=0;
+    FILE *file=fopen("/mnt/data/config.ini", "r");
+    if(file) {
+        length=fread(config, 1, sizeof config-1, file);
+        fclose(file);
+    }
+    config[length]='\0';
+    app_theme(config, hour);
+}
+
 int main(void)
 {
     unlink(ERROR_FILE);
@@ -100,6 +113,7 @@ int main(void)
     struct app app;
     app_init(&app, TASK_FILE);
 
+    int theme_hour = -1;
     error = "Q2 Pod input socket stopped responding";
     while (!stopping && !app.quit) {
         time_t date = time(NULL);
@@ -107,6 +121,10 @@ int main(void)
         struct tm local;
         if (localtime_r(&date, &local))
             today = local;
+        if (theme_hour != today.tm_hour) {
+            theme_hour = today.tm_hour;
+            load_theme(theme_hour);
+        }
         int64_t now = monotonic_ms();
         if (can_pan) {
             unsigned back = visible ? 0 : WIDTH;
