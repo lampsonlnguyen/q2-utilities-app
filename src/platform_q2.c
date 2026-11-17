@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #define INPUT_SOCKET "/tmp/q2-utilities.input.sock"
+#define ERROR_FILE "/mnt/mmc/.utilities/launch-error.txt"
 #define TASK_FILE "/mnt/mmc/.utilities/tasks.tsv"
 
 static volatile sig_atomic_t stopping;
@@ -53,11 +54,22 @@ static void paint(uint32_t *page, unsigned stride)
 {
     for (int y = 0; y < WIDTH; ++y)
         for (int x = 0; x < HEIGHT; ++x)
-            page[y * stride + x] = canvas[(HEIGHT - 1 - x) * WIDTH + y];
+            page[y * stride + x] = 0xff000000u | canvas[(HEIGHT - 1 - x) * WIDTH + y];
+}
+
+static int launch_error(const char *message)
+{
+    FILE *file = fopen(ERROR_FILE, "w");
+    if (file) {
+        fprintf(file, "%s\n", message);
+        fclose(file);
+    }
+    return 1;
 }
 
 int main(void)
 {
+    unlink(ERROR_FILE);
     struct sigaction action = { .sa_handler = stop };
     sigemptyset(&action.sa_mask);
     sigaction(SIGTERM, &action, NULL);
@@ -65,29 +77,38 @@ int main(void)
 
     int fb = open("/dev/fb0", O_RDWR | O_CLOEXEC);
     if (fb < 0)
-        return 1;
+        return launch_error("Could not open /dev/fb0");
     struct fb_var_screeninfo var;
     struct fb_fix_screeninfo fix;
     int result = 1;
+    const char *error = "Could not read framebuffer settings";
     if (ioctl(fb, FBIOGET_VSCREENINFO, &var) || ioctl(fb, FBIOGET_FSCREENINFO, &fix))
         goto close_fb;
-    if (var.xres != HEIGHT || var.yres != WIDTH || var.yres_virtual < 2 * WIDTH ||
-        (var.yoffset != 0 && var.yoffset != WIDTH) || var.xoffset ||
-        var.bits_per_pixel != 32 || var.red.offset != 16 || var.green.offset != 8 ||
-        var.blue.offset != 0 || fix.line_length % 4 || fix.line_length < HEIGHT * 4 ||
-        (uint64_t)2 * WIDTH * fix.line_length > fix.smem_len)
+    error = "Unsupported framebuffer dimensions or pixel format";
+    if (var.xres != HEIGHT || var.yres != WIDTH || var.xoffset ||
+        var.bits_per_pixel != 32 || var.red.offset != 16 ||
+        fix.line_length % 4 || fix.line_length < HEIGHT * 4)
         goto close_fb;
-    unsigned stride = fix.line_length / 4, front = var.yoffset, back = front ? 0 : WIDTH;
+    unsigned stride = fix.line_length / 4, front = var.yoffset, visible = front;
+    unsigned rows = fix.smem_len / fix.line_length;
+    if (rows > var.yres_virtual)
+        rows = var.yres_virtual;
+    if (rows < WIDTH || front > rows - WIDTH)
+        goto close_fb;
+    bool can_pan = rows >= 2 * WIDTH && (front == 0 || front == WIDTH);
+    error = "Could not map the framebuffer";
     uint32_t *memory = mmap(NULL, fix.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb, 0);
     if (memory == MAP_FAILED)
         goto close_fb;
 
+    error = "Could not bind the Q2 Pod input socket";
     int sock = input_socket();
     if (sock < 0)
         goto unmap;
     struct app app;
     app_init(&app, TASK_FILE);
 
+    error = "Q2 Pod input socket stopped responding";
     while (!stopping && !app.quit) {
         time_t date = time(NULL);
         struct tm today = { .tm_year = 70, .tm_mday = 1 };
@@ -95,11 +116,17 @@ int main(void)
         if (localtime_r(&date, &local))
             today = local;
         app_draw(&app, canvas, monotonic_ms(), &today);
-        paint(memory + back * stride, stride);
-        var.yoffset = back;
-        if (ioctl(fb, FBIOPAN_DISPLAY, &var) != 0)
-            break;
-        back = back ? 0 : WIDTH;
+        if (can_pan) {
+            unsigned back = visible ? 0 : WIDTH;
+            paint(memory + back * stride, stride);
+            var.yoffset = back;
+            if (ioctl(fb, FBIOPAN_DISPLAY, &var) == 0)
+                visible = back;
+            else
+                can_pan = false;
+        }
+        if (!can_pan)
+            paint(memory + visible * stride, stride);
         int timeout = app.screen == STOPWATCH && app.running ? 100 :
                       1000;
         struct pollfd poll_input = {.fd = sock, .events = POLLIN};
@@ -118,13 +145,15 @@ int main(void)
         }
     }
     result = (stopping || app.quit) ? 0 : 1;
-    var.yoffset = front;
-    ioctl(fb, FBIOPAN_DISPLAY, &var);
+    if (visible != front) {
+        var.yoffset = front;
+        ioctl(fb, FBIOPAN_DISPLAY, &var);
+    }
     close(sock);
     unlink(INPUT_SOCKET);
 unmap:
     munmap(memory, fix.smem_len);
 close_fb:
     close(fb);
-    return result;
+    return result ? launch_error(error) : 0;
 }
