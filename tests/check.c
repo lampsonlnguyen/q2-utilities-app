@@ -63,7 +63,7 @@ static void calendar(void)
 
 static void tasks(const char *path)
 {
-    tap(50, 180, 0);
+    tap(50, 145, 0);
     tap(50, 250, 0);
     assert(app.screen == EDIT_TASK);
     tap(25, 105, 0); /* A */
@@ -74,7 +74,7 @@ static void tasks(const char *path)
     app_init(&app, path);
     assert(app.task_count == 1 && app.tasks[0].done && !strcmp(app.tasks[0].text, "A"));
 
-    tap(50, 180, 0);
+    tap(50, 145, 0);
     tap(50, 55, 0);
     tap(50, 180, 0);
     app_init(&app, path);
@@ -83,7 +83,7 @@ static void tasks(const char *path)
 
 static void calculator(void)
 {
-    tap(50, 235, 0);
+    tap(50, 185, 0);
     tap(50, 105, 0);  /* 7 */
     tap(300, 105, 0); /* / */
     tap(50, 180, 0);  /* 1 */
