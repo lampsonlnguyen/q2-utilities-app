@@ -40,4 +40,4 @@ Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including 
 
 The bottom of the screen is kept clear, without footer text.
 
-Menu rows are compact (38-pixel spacing) to leave room for additional entries. Interface text is smaller, with centered headings and safe screen margins.
+Menu rows are compact (38-pixel spacing) to leave room for additional entries. Interface text uses smooth glyphs close to the original size, with centered headings and safe screen margins.

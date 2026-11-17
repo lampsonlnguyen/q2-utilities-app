@@ -503,7 +503,7 @@ static int text_width(const char *text)
 {
     int width = 0;
     for (; *text; ++text)
-        width += f20_adv[glyph((unsigned char)*text)] * 4 / 5;
+        width += f20_adv[glyph((unsigned char)*text)];
     return width;
 }
 
@@ -521,14 +521,13 @@ static void draw_text_fitted(uint32_t *pixels, unsigned stride, int x, int y, in
     for (; *text; ++text) {
         int index = glyph((unsigned char)*text);
         int w = f20_adv[index];
-        int advance = w * 4 / 5;
-        if (narrow) advance = advance * 2 / 3;
-        if (x + advance > WIDTH || y + F20_H * 4 / 5 > HEIGHT)
+        int advance = narrow ? w * 2 / 3 : w;
+        if (x + advance > WIDTH || y + F20_H > HEIGHT)
             break;
         const unsigned char *bitmap = f20_px + f20_off[index];
-        for (int r = 0; r < F20_H * 4 / 5; ++r) {
+        for (int r = 0; r < F20_H; ++r) {
             for (int c = 0; c < advance; ++c) {
-                unsigned alpha = bitmap[(r * 5 / 4) * w + c * w / advance];
+                unsigned alpha = bitmap[r * w + c * w / advance];
                 if (alpha) {
                     uint32_t *pixel = &pixels[(x + c) * stride + (HEIGHT - 1 - y - r)];
                     *pixel = 0xff000000u | (alpha == 255 ? color : blend(*pixel, color, alpha));
@@ -627,7 +626,7 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
         bool selected = i == app->focus;
         fill(pixels, stride, item->x, item->y, item->w, item->h, selected ? SELECT : PANEL);
         uint32_t color = selected ? SELECT_INK : INK;
-        int y = item->y + (item->h - F20_H * 4 / 5) / 2;
+        int y = item->y + (item->h - F20_H) / 2;
         if (app->screen == HOME || (app->screen == TODO && item->code >= 0))
             draw_text_fitted(pixels, stride, item->x + 10, y, item->w - 20, item->label, color);
         else
