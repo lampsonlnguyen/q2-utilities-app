@@ -517,9 +517,9 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
     make_layout(app, &layout);
     fill(pixels, stride, 0, 0, WIDTH, HEIGHT, BG);
     fill(pixels, stride, 18, 39, 339, 2, PANEL);
-    draw_text(pixels, stride, 18, 10, titles[app->screen], INK);
-    const char *footer = app->screen == HOME ? "Wheel: select     Centre: open     Return: exit" :
-                                              "Wheel: select     Centre: OK     Return: back";
+    centered(pixels, stride, 0, 10, WIDTH, titles[app->screen], INK);
+    const char *footer = app->screen == HOME ? "Wheel: select  Centre: open  Exit" :
+                                              "Wheel: select  Centre: OK  Back";
     char value[64];
 
     switch (app->screen) {
@@ -576,5 +576,6 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
         else
             centered(pixels, stride, item->x, y, item->w, item->label, color);
     }
-    centered(pixels, stride, 0, 293, WIDTH, footer, MUTED);
+    /* Move the controls up and right to clear the display’s rounded corners. */
+    centered(pixels, stride, 12, 289, WIDTH - 12, footer, MUTED);
 }
