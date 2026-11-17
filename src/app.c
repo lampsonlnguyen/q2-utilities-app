@@ -575,32 +575,6 @@ static void draw_calendar(const struct app *app, uint32_t *pixels, unsigned stri
     }
 }
 
-/* Compact 3x5 capitals keep bottom hints clear of the rounded glass. */
-static void draw_footer(uint32_t *d,unsigned s,const char *str) {
-    static const unsigned char font[26][5]={
-        {2,5,7,5,5},{6,5,6,5,6},{3,4,4,4,3},{6,5,5,5,6},
-        {7,4,6,4,7},{7,4,6,4,4},{3,4,5,5,3},{5,5,7,5,5},
-        {7,2,2,2,7},{1,1,1,5,2},{5,5,6,5,5},{4,4,4,4,7},
-        {5,7,7,5,5},{5,7,7,7,5},{2,5,5,5,2},{6,5,6,4,4},
-        {2,5,5,3,1},{6,5,6,5,5},{3,4,2,1,6},{7,2,2,2,2},
-        {5,5,5,5,7},{5,5,5,5,2},{5,5,7,7,5},{5,5,2,5,5},
-        {5,5,2,2,2},{7,1,2,4,7}};
-    int n=0; while(str[n]) ++n;
-    int x=(WIDTH-(n*4-1))/2;
-    for (;*str;++str,x+=4) {
-        char c=*str;
-        if(c>='a' && c<='z') c-=32;
-        if(c==':') {
-            fill(d,s,x+1,294,1,1,MUTED);
-            fill(d,s,x+1,296,1,1,MUTED);
-        }
-        if (c<'A' || c>'Z') continue;
-        for (int y=0;y<5;++y)
-            for (int col=0;col<3;++col)
-                if (font[c-'A'][y]&(4>>col)) fill(d,s,x+col,293+y,1,1,MUTED);
-    }
-}
-
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, const struct tm *today)
 {
     struct layout layout;
@@ -608,8 +582,6 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
     fill(pixels, stride, 0, 0, WIDTH, HEIGHT, BG);
     fill(pixels, stride, 18, 39, 339, 2, PANEL);
     centered(pixels, stride, 0, 10, WIDTH, titles[app->screen], INK);
-    const char *footer = app->screen == HOME ? "Wheel: select  Centre: open  Exit" :
-                                              "Wheel: select  Centre: OK  Back";
     char value[64];
 
     switch (app->screen) {
@@ -629,10 +601,6 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
     case TODO:
         if (!app->task_count)
             draw_text(pixels, stride, 18, 70, "No tasks yet", MUTED);
-        if (app->load_failed)
-            footer = "Cannot read task file";
-        else if (app->save_failed)
-            footer = "Could not save changes";
         break;
     case TASK_ACTIONS:
         draw_text(pixels, stride, 18, 66, app->tasks[app->task_index].text, INK);
@@ -640,8 +608,6 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
     case EDIT_TASK:
         fill(pixels, stride, 18, 50, 339, 39, PANEL);
         draw_text_fitted(pixels, stride, 28, 57, 319, app->draft[0] ? app->draft : "Task name", app->draft[0] ? INK : MUTED);
-        if (app->save_failed)
-            footer = "Could not save changes";
         break;
     case CALCULATOR:
         fill(pixels, stride, 18, 46, 339, 42, PANEL);
@@ -666,5 +632,4 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
         else
             centered(pixels, stride, item->x, y, item->w, item->label, color);
     }
-    draw_footer(pixels, stride, footer);
 }
