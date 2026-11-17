@@ -418,11 +418,16 @@ void app_input(struct app *app, const char *message, int64_t now, const struct t
 
 #include "font.h"
 
-static void fill(uint32_t *pixels, int x, int y, int w, int h, uint32_t color)
+static void fill(uint32_t *pixels, unsigned stride, int x, int y, int w, int h, uint32_t color)
 {
-    for (int row = y; row < y + h; ++row)
-        for (int column = x; column < x + w; ++column)
-            pixels[row * WIDTH + column] = color;
+    /* Logical (x, y) is (HEIGHT - 1 - y, x) in the Q2 portrait buffer. */
+    int left = HEIGHT - y - h;
+    int right = HEIGHT - y;
+    for (int column = x; column < x + w; ++column) {
+        uint32_t *row = pixels + column * stride;
+        for (int px = left; px < right; ++px)
+            row[px] = 0xff000000u | color;
+    }
 }
 
 static int glyph(unsigned char c)
@@ -445,7 +450,7 @@ static uint32_t blend(uint32_t bg, uint32_t fg, unsigned alpha)
     return (rb & 0xff00ff) | (g & 0x00ff00);
 }
 
-static void draw_text_fitted(uint32_t *pixels, int x, int y, int max_width,
+static void draw_text_fitted(uint32_t *pixels, unsigned stride, int x, int y, int max_width,
                              const char *text, uint32_t color)
 {
     bool narrow = text_width(text) > max_width;
@@ -460,8 +465,8 @@ static void draw_text_fitted(uint32_t *pixels, int x, int y, int max_width,
             for (int c = 0; c < advance; ++c) {
                 unsigned alpha = bitmap[r * w + c * w / advance];
                 if (alpha) {
-                    uint32_t *pixel = &pixels[(y + r) * WIDTH + x + c];
-                    *pixel = alpha == 255 ? color : blend(*pixel, color, alpha);
+                    uint32_t *pixel = &pixels[(x + c) * stride + (HEIGHT - 1 - y - r)];
+                    *pixel = 0xff000000u | (alpha == 255 ? color : blend(*pixel, color, alpha));
                 }
             }
         }
@@ -469,18 +474,18 @@ static void draw_text_fitted(uint32_t *pixels, int x, int y, int max_width,
     }
 }
 
-static void draw_text(uint32_t *pixels, int x, int y, const char *text, uint32_t color)
+static void draw_text(uint32_t *pixels, unsigned stride, int x, int y, const char *text, uint32_t color)
 {
-    draw_text_fitted(pixels, x, y, WIDTH - x, text, color);
+    draw_text_fitted(pixels, stride, x, y, WIDTH - x, text, color);
 }
 
-static void centered(uint32_t *pixels, int x, int y, int w, const char *text, uint32_t color)
+static void centered(uint32_t *pixels, unsigned stride, int x, int y, int w, const char *text, uint32_t color)
 {
     int offset = (w - text_width(text)) / 2;
-    draw_text(pixels, x + (offset > 0 ? offset : 0), y, text, color);
+    draw_text(pixels, stride, x + (offset > 0 ? offset : 0), y, text, color);
 }
 
-static void draw_calendar(const struct app *app, uint32_t *pixels, const struct tm *today)
+static void draw_calendar(const struct app *app, uint32_t *pixels, unsigned stride, const struct tm *today)
 {
     static const char *const months[] = {
         "January", "February", "March", "April", "May", "June",
@@ -489,9 +494,9 @@ static void draw_calendar(const struct app *app, uint32_t *pixels, const struct 
     static const char *const weekdays[] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
     char label[32];
     snprintf(label, sizeof label, "%s %d", months[app->month], app->year);
-    centered(pixels, 18, 44, 339, label, INK);
+    centered(pixels, stride, 18, 44, 339, label, INK);
     for (int i = 0; i < 7; ++i)
-        centered(pixels, 19 + i * 48, 72, 48, weekdays[i], MUTED);
+        centered(pixels, stride, 19 + i * 48, 72, 48, weekdays[i], MUTED);
     int first = first_weekday(app->year, app->month);
     int days = days_in_month(app->year, app->month);
     bool current_month = app->year == today->tm_year + 1900 && app->month == today->tm_mon;
@@ -500,19 +505,19 @@ static void draw_calendar(const struct app *app, uint32_t *pixels, const struct 
         int x = 19 + cell % 7 * 48, y = 96 + cell / 7 * 24;
         bool current = current_month && day == today->tm_mday;
         if (current)
-            fill(pixels, x + 9, y, 30, 24, ACCENT);
+            fill(pixels, stride, x + 9, y, 30, 24, ACCENT);
         snprintf(label, sizeof label, "%d", day);
-        centered(pixels, x, y, 48, label, current ? BG : INK);
+        centered(pixels, stride, x, y, 48, label, current ? BG : INK);
     }
 }
 
-void app_draw(struct app *app, uint32_t *pixels, int64_t now, const struct tm *today)
+void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, const struct tm *today)
 {
     struct layout layout;
     make_layout(app, &layout);
-    fill(pixels, 0, 0, WIDTH, HEIGHT, BG);
-    fill(pixels, 18, 39, 339, 2, PANEL);
-    draw_text(pixels, 18, 10, titles[app->screen], INK);
+    fill(pixels, stride, 0, 0, WIDTH, HEIGHT, BG);
+    fill(pixels, stride, 18, 39, 339, 2, PANEL);
+    draw_text(pixels, stride, 18, 10, titles[app->screen], INK);
     const char *footer = app->screen == HOME ? "Wheel: select     Centre: open     Return: exit" :
                                               "Wheel: select     Centre: OK     Return: back";
     char value[64];
@@ -520,41 +525,41 @@ void app_draw(struct app *app, uint32_t *pixels, int64_t now, const struct tm *t
     switch (app->screen) {
     case STOPWATCH:
         format_elapsed(value, sizeof value, elapsed(app, now));
-        centered(pixels, 18, 78, 339, value, ACCENT);
+        centered(pixels, stride, 18, 78, 339, value, ACCENT);
         for (unsigned i = 0; i < app->lap_count && i < LAP_LIMIT; ++i) {
             char time[32];
             format_elapsed(time, sizeof time, app->laps[i]);
             snprintf(value, sizeof value, "Lap %u    %s", app->lap_count - i, time);
-            centered(pixels, 18, 175 + 25 * (int)i, 339, value, MUTED);
+            centered(pixels, stride, 18, 175 + 25 * (int)i, 339, value, MUTED);
         }
         break;
     case CALENDAR:
-        draw_calendar(app, pixels, today);
+        draw_calendar(app, pixels, stride, today);
         break;
     case TODO:
         if (!app->task_count)
-            draw_text(pixels, 18, 70, "No tasks yet", MUTED);
+            draw_text(pixels, stride, 18, 70, "No tasks yet", MUTED);
         if (app->load_failed)
             footer = "Cannot read task file";
         else if (app->save_failed)
             footer = "Could not save changes";
         break;
     case TASK_ACTIONS:
-        draw_text(pixels, 18, 66, app->tasks[app->task_index].text, INK);
+        draw_text(pixels, stride, 18, 66, app->tasks[app->task_index].text, INK);
         break;
     case EDIT_TASK:
-        fill(pixels, 18, 50, 339, 39, PANEL);
-        draw_text_fitted(pixels, 28, 57, 319, app->draft[0] ? app->draft : "Task name", app->draft[0] ? INK : MUTED);
+        fill(pixels, stride, 18, 50, 339, 39, PANEL);
+        draw_text_fitted(pixels, stride, 28, 57, 319, app->draft[0] ? app->draft : "Task name", app->draft[0] ? INK : MUTED);
         if (app->save_failed)
             footer = "Could not save changes";
         break;
     case CALCULATOR:
-        fill(pixels, 18, 46, 339, 42, PANEL);
+        fill(pixels, stride, 18, 46, 339, 42, PANEL);
         if (app->op && !app->error) {
             snprintf(value, sizeof value, "%c", app->op);
-            draw_text(pixels, 30, 55, value, MUTED);
+            draw_text(pixels, stride, 30, 55, value, MUTED);
         }
-        draw_text(pixels, 345 - text_width(app->number), 55, app->number, INK);
+        draw_text(pixels, stride, 345 - text_width(app->number), 55, app->number, INK);
         break;
     case HOME:
         break;
@@ -563,13 +568,13 @@ void app_draw(struct app *app, uint32_t *pixels, int64_t now, const struct tm *t
     for (int i = 0; i < layout.count; ++i) {
         const struct button *item = &layout.items[i];
         bool selected = i == app->focus;
-        fill(pixels, item->x, item->y, item->w, item->h, selected ? ACCENT : PANEL);
+        fill(pixels, stride, item->x, item->y, item->w, item->h, selected ? ACCENT : PANEL);
         uint32_t color = selected ? BG : INK;
         int y = item->y + (item->h - F20_H) / 2;
         if (app->screen == HOME || (app->screen == TODO && item->code >= 0))
-            draw_text_fitted(pixels, item->x + 10, y, item->w - 20, item->label, color);
+            draw_text_fitted(pixels, stride, item->x + 10, y, item->w - 20, item->label, color);
         else
-            centered(pixels, item->x, y, item->w, item->label, color);
+            centered(pixels, stride, item->x, y, item->w, item->label, color);
     }
-    centered(pixels, 0, 293, WIDTH, footer, MUTED);
+    centered(pixels, stride, 0, 293, WIDTH, footer, MUTED);
 }

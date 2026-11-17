@@ -14,7 +14,7 @@ static const struct tm today = {.tm_year = 124, .tm_mon = 1, .tm_mday = 29};
 static void send(const char *message, int64_t now)
 {
     app_input(&app, message, now, &today);
-    app_draw(&app, pixels, now, &today);
+    app_draw(&app, pixels, HEIGHT, now, &today);
 }
 
 static void tap(int x, int y, int64_t now)
@@ -52,7 +52,7 @@ static void calendar(void)
     send("w -9", 0);
     send("k u 218", 0);
     assert(app.screen == CALENDAR && app.year == 2024 && app.month == 1);
-    assert(pixels[199 * WIDTH + 220] == 0x84ead1);
+    assert(pixels[220 * HEIGHT + HEIGHT - 1 - 199] == 0xff84ead1);
     for (int i = 0; i < 10; ++i)
         tap(50, 252, 0);
     assert(app.year == 2023 && app.month == 3);

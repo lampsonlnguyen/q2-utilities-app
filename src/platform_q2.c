@@ -22,7 +22,6 @@
 #define TASK_FILE "/mnt/mmc/.utilities/tasks.tsv"
 
 static volatile sig_atomic_t stopping;
-static uint32_t canvas[WIDTH * HEIGHT];
 
 static void stop(int sig)
 {
@@ -48,13 +47,6 @@ static int input_socket(void)
         return fd;
     close(fd);
     return -1;
-}
-
-static void paint(uint32_t *page, unsigned stride)
-{
-    for (int y = 0; y < WIDTH; ++y)
-        for (int x = 0; x < HEIGHT; ++x)
-            page[y * stride + x] = 0xff000000u | canvas[(HEIGHT - 1 - x) * WIDTH + y];
 }
 
 static int launch_error(const char *message)
@@ -115,10 +107,10 @@ int main(void)
         struct tm local;
         if (localtime_r(&date, &local))
             today = local;
-        app_draw(&app, canvas, monotonic_ms(), &today);
+        int64_t now = monotonic_ms();
         if (can_pan) {
             unsigned back = visible ? 0 : WIDTH;
-            paint(memory + back * stride, stride);
+            app_draw(&app, memory + back * stride, stride, now, &today);
             var.yoffset = back;
             if (ioctl(fb, FBIOPAN_DISPLAY, &var) == 0)
                 visible = back;
@@ -126,7 +118,7 @@ int main(void)
                 can_pan = false;
         }
         if (!can_pan)
-            paint(memory + visible * stride, stride);
+            app_draw(&app, memory + visible * stride, stride, now, &today);
         int timeout = app.screen == STOPWATCH && app.running ? 100 :
                       1000;
         struct pollfd poll_input = {.fd = sock, .events = POLLIN};

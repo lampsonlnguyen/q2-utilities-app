@@ -37,6 +37,7 @@ struct app {
 
 void app_init(struct app *app, const char *task_path);
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today);
-void app_draw(struct app *app, uint32_t *pixels, int64_t now, const struct tm *today);
+/* Draw an opaque frame into a portrait framebuffer. Stride is in pixels. */
+void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, const struct tm *today);
 
 #endif
