@@ -37,15 +37,16 @@ jobs:
           make
       - name: Verify install package
         run: |
-          unzip -t dist/utilities.zip
-          unzip -p dist/utilities.zip .utilities-app/q2app | grep -Fx 'game=1'
-          unzip -p dist/utilities.zip .utilities-app/q2app | grep -Fx 'row=library'
-          test "$(unzip -Z1 dist/utilities.zip | sort)" = "$(printf '%s\n' .utilities-app/q2-utilities-app .utilities-app/q2app | sort)"
+          unzip -t dist/.utilities-app.zip
+          unzip -p dist/.utilities-app.zip .utilities-app/q2app | grep -Fx 'game=1'
+          unzip -p dist/.utilities-app.zip .utilities-app/q2app | grep -Fx 'row=library'
+          test "$(unzip -Z1 dist/.utilities-app.zip | sort)" = "$(printf '%s\n' .utilities-app/q2-utilities-app .utilities-app/q2app | sort)"
           file dist/.utilities-app/q2-utilities-app | grep -E 'ELF 32-bit LSB.*MIPS'
       - uses: actions/upload-artifact@v6
         with:
           name: q2-utilities-app-card-app
-          path: dist/utilities.zip
+          path: dist/.utilities-app.zip
+          include-hidden-files: true
           if-no-files-found: error
 
   release:
@@ -66,8 +67,8 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/utilities.zip --clobber
+            gh release upload "$RELEASE_TAG" dist/.utilities-app.zip --clobber
           else
-            gh release create "$RELEASE_TAG" dist/utilities.zip \
+            gh release create "$RELEASE_TAG" dist/.utilities-app.zip \
               --verify-tag --generate-notes --title "$RELEASE_TAG"
           fi

@@ -6,7 +6,7 @@ Q2_FLAGS = --target=mipsel-linux-gnu --sysroot="$(SYSROOT)" -march=mips32r2 -mab
 Q2_OBJECTS = build/q2/app.o build/q2/platform_q2.o build/q2/crt-q2.o
 CARD = dist/.utilities-app
 
-all: dist/utilities.zip
+all: dist/.utilities-app.zip
 
 check-sysroot:
 	@test -r "$(SYSROOT)/usr/include/time.h" && \
@@ -30,8 +30,8 @@ $(CARD)/q2app: q2app
 	mkdir -p $(@D)
 	cp $< $@
 
-dist/utilities.zip: $(CARD)/q2-utilities-app $(CARD)/q2app
-	cd dist && rm -f utilities.zip && zip -q utilities.zip .utilities-app/q2app .utilities-app/q2-utilities-app
+dist/.utilities-app.zip: $(CARD)/q2-utilities-app $(CARD)/q2app
+	cd dist && rm -f .utilities-app.zip && zip -q .utilities-app.zip .utilities-app/q2app .utilities-app/q2-utilities-app
 
 build/host/check: tests/check.c src/app.c src/app.h src/font.h
 	mkdir -p $(@D)
