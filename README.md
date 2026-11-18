@@ -1,4 +1,4 @@
-# Q2 Utilities
+# Utilities
 
 A full-screen utility card app for the Shanling Q2 running [Q2 Pod](https://github.com/DiamondBond/q2-pod).
 
@@ -26,7 +26,11 @@ Use the full path to the stock ZIP if it is outside the checkout. If you already
 have a Q2 sysroot, run `make SYSROOT=/actual/sysroot/location`.
 
 1. Extract `dist/utilities.zip` at the root of the SD card. The result should be `.utilities/q2-utilities` and `.utilities/q2app`. The leading dot may hide the folder in your file browser.
-2. Eject the card and open **Library → Games → Utilities** in a Q2 Pod build with card game support.
+2. Eject the card and open **Library → Utilities**, above Games, in a Q2 Pod build containing [Library card-app placement](https://github.com/DiamondBond/q2-pod/commit/41b18ffa1979acaeeb98f49b7dd921d7d321b1ce).
+
+The manifest uses `name=Utilities`, `game=1`, and `row=library`. The `game` key enables full-screen rendering; the `row` key places the launcher directly in Library. Older firmware that does not support `row` continues to list Utilities under Games.
+
+For an existing installation, replace `.utilities/q2app` with the updated file and leave and reopen Library. This placement change does not require rebuilding the executable.
 
 `make check` runs the host checks with a C compiler. It exercises the on-screen touch targets, wheel and Centre navigation, lap and pause timing, a leap-day calendar, to-do persistence, and calculator error recovery.
 
