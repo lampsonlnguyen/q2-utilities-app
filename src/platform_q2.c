@@ -17,9 +17,9 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#define INPUT_SOCKET "/tmp/q2-utilities.input.sock"
-#define ERROR_FILE "/mnt/mmc/.utilities/launch-error.txt"
-#define TASK_FILE "/mnt/mmc/.utilities/tasks.tsv"
+#define INPUT_SOCKET "/tmp/q2-utilities-app.input.sock"
+#define ERROR_FILE "/mnt/mmc/.utilities-app/launch-error.txt"
+#define TASK_FILE "/mnt/mmc/.utilities-app/tasks.tsv"
 
 static volatile sig_atomic_t stopping;
 

@@ -38,8 +38,10 @@ jobs:
       - name: Verify install package
         run: |
           unzip -t dist/utilities.zip
-          unzip -p dist/utilities.zip .utilities/q2app | grep -Fx 'game=1'
-          file dist/.utilities/q2-utilities | grep -E 'ELF 32-bit LSB.*MIPS'
+          unzip -p dist/utilities.zip .utilities-app/q2app | grep -Fx 'game=1'
+          unzip -p dist/utilities.zip .utilities-app/q2app | grep -Fx 'row=library'
+          test "$(unzip -Z1 dist/utilities.zip | sort)" = "$(printf '%s\n' .utilities-app/q2-utilities-app .utilities-app/q2app | sort)"
+          file dist/.utilities-app/q2-utilities-app | grep -E 'ELF 32-bit LSB.*MIPS'
       - uses: actions/upload-artifact@v6
         with:
           name: q2-utilities-app-card-app

@@ -6,7 +6,7 @@ A full-screen utility card app for the Shanling Q2 running [Q2 Pod](https://gith
 | --- | --- |
 | Stopwatch | Start, pause, resume, and reset. Records cumulative lap times and shows the latest four. Timing continues when you return to the Utilities menu while the app is open. |
 | Calendar | Browse months, highlight the player's current date, and jump back with **Today**. The date comes from the Q2 clock. |
-| To-do | Add, complete, reopen, and delete up to 32 tasks. Use the on-screen keyboard for names up to 24 characters. Tasks are saved in `.utilities/tasks.tsv` on the SD card. |
+| To-do | Add, complete, reopen, and delete up to 32 tasks. Use the on-screen keyboard for names up to 24 characters. Tasks are saved in `.utilities-app/tasks.tsv` on the SD card. |
 | Calculator | Add, subtract, multiply, and divide with decimal input. Operations are evaluated in entry order. **C** clears the calculator and **<** erases the last digit. |
 
 Turn the clickwheel to move the highlight and press Centre to select. You can also tap a button. Press Return to go back, or press it from the Utilities menu to exit. Q2 Pod also handles holding Return to close the app. Stopwatch and calculator state reset when the app closes. Q2 Pod may close an idle card app after two minutes unless Smart Awake is enabled.
@@ -25,12 +25,14 @@ make
 Use the full path to the stock ZIP if it is outside the checkout. If you already
 have a Q2 sysroot, run `make SYSROOT=/actual/sysroot/location`.
 
-1. Extract `dist/utilities.zip` at the root of the SD card. The result should be `.utilities/q2-utilities` and `.utilities/q2app`. The leading dot may hide the folder in your file browser.
+1. Extract `dist/utilities.zip` at the root of the SD card. The result should be `.utilities-app/q2-utilities-app` and `.utilities-app/q2app`. The leading dot may hide the folder in your file browser.
 2. Eject the card and open **Library → Utilities**, above Games, in a Q2 Pod build containing [Library card-app placement](https://github.com/DiamondBond/q2-pod/commit/41b18ffa1979acaeeb98f49b7dd921d7d321b1ce).
 
 The manifest uses `name=Utilities`, `game=1`, and `row=library`. The `game` key enables full-screen rendering; the `row` key places the launcher directly in Library. Older firmware that does not support `row` continues to list Utilities under Games.
 
-For an existing installation, replace `.utilities/q2app` with the updated file and leave and reopen Library. This placement change does not require rebuilding the executable.
+For an existing installation, install the new ZIP, copy `.utilities/tasks.tsv` to `.utilities-app/tasks.tsv` to preserve your tasks, and remove the old `.utilities` folder to avoid a duplicate launcher. Leave and reopen Library.
+
+The store derives the app ID `utilities-app` from this repository name. The ZIP must contain `.utilities-app/q2app` and `.utilities-app/q2-utilities-app`; the executable listens on `/tmp/q2-utilities-app.input.sock`.
 
 `make check` runs the host checks with a C compiler. It exercises the on-screen touch targets, wheel and Centre navigation, lap and pause timing, a leap-day calendar, to-do persistence, and calculator error recovery.
 
