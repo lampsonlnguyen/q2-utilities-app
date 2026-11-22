@@ -1233,7 +1233,9 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
     make_layout(app, &layout);
     fill(pixels, stride, 0, 0, WIDTH, HEIGHT, BG);
     /* q2-pod's 26 px status bar: the theme's gloss/flat bar, its bottom
-     * line, the screen title (the calendar's month + year) and < Back. */
+     * line, and the centred screen title (the calendar's month + year).
+     * There is no "< Back" label: the wheel's Return key already goes
+     * back, so the bar keeps only the title. */
     vgrad(pixels, stride, 0, 0, WIDTH, Q2POD_BAR_H, SCHEME.bar, Q2POD_BAR_STOPS);
     if (SCHEME.bar_line2)
         fill(pixels, stride, 0, Q2POD_BAR_H - 2, WIDTH, 1, SCHEME.bar_line2);
@@ -1247,8 +1249,6 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         snprintf(title, sizeof title, "%s", titles[app->screen]);
     if (SCHEME.caps_bar)
         upper(title);
-    if (app->screen != HOME)
-        draw_text(pixels, stride, 10, 3, "< Back", INK);
     centered(pixels, stride, 0, 3, WIDTH, title, INK);
     char value[64];
 
