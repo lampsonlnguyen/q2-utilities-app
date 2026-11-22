@@ -53,7 +53,11 @@ city's detail view; press Return to go back to the list, focused on
 the pin's city. The map is drawn from coarse continent outlines in
 `src/app.c`, not from an image file: the card app ships no assets, and
 each city carries its latitude, longitude, country, and abbreviation
-in `src/worldclock.c`.
+in `src/worldclock.c`. The Q2 is a colour screen, so each landmass gets
+its own soft atlas colour (teal North America, green South America,
+lavender Europe, sandy Africa, rose Asia, ochre Australia, and so on),
+one fixed mid-tone palette that reads on both the light and the dark
+paper, and the pin city's GMT band is tinted with the theme accent.
 
 ## Build and install
 

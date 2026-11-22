@@ -932,11 +932,14 @@ static void draw_world_clock_row(struct app *app, uint32_t *pixels, unsigned str
  * The map is drawn from coarse lon/lat continent polygons, filled by a
  * scanline fill in the map's equirectangular projection (1 degree is
  * about 1 pixel). No image files are loaded: the Q2 ships no map art
- * and the card app has no assets. Vertical lines mark the 24 one-hour
- * GMT bands, the pin city's band is highlighted, and the info panel
- * below reads like Ubuntu's Date & Time tooltip: city and country,
- * abbreviation and UTC offset with the local time, then the date and
- * the difference from Los Angeles. */
+ * and the card app has no assets. The Q2 is a colour screen, so each
+ * landmass gets its own soft atlas colour — one fixed palette, picked
+ * mid-tone so it reads on both the light and the dark paper — instead
+ * of the theme's ink. Vertical lines mark the 24 one-hour GMT bands,
+ * the pin city's band is tinted with the theme accent, and the info
+ * panel below reads like Ubuntu's Date & Time tooltip: city and
+ * country, abbreviation and UTC offset with the local time, then the
+ * date and the difference from Los Angeles. */
 static const short POLY_NORTH_AMERICA[][2] = {
     {-168, 66}, {-160, 58}, {-153, 58}, {-145, 60}, {-137, 58}, {-130, 54},
     {-125, 49}, {-124, 40}, {-121, 34}, {-117, 33}, {-114, 29}, {-110, 23},
@@ -948,6 +951,9 @@ static const short POLY_NORTH_AMERICA[][2] = {
     {-64, 58}, {-68, 58}, {-73, 62}, {-78, 62}, {-85, 66}, {-92, 66},
     {-95, 69}, {-105, 68}, {-115, 69}, {-125, 70}, {-137, 70}, {-150, 71},
     {-162, 71},
+};
+static const short POLY_HAWAII[][2] = {
+    {-155, 19}, {-156, 20}, {-159, 21}, {-160, 22}, {-156, 19},
 };
 static const short POLY_GREENLAND[][2] = {
     {-58, 64}, {-52, 60}, {-44, 60}, {-40, 64}, {-32, 68}, {-25, 70},
@@ -1091,14 +1097,15 @@ static void draw_world_clock_map(struct app *app, uint32_t *pixels, unsigned str
     (void)today;
     const struct wc_city *city = &WC_CITIES[WC_MAP_ORDER[app->wc_map]];
     uint32_t grid = blend(BG, MUTED, 64);
-    /* The pin city's GMT band: one hour is 15 degrees of longitude. */
+    /* The pin city's GMT band: one hour is 15 degrees of longitude,
+     * tinted with the theme accent so it follows the accent colour. */
     int band = (int)((city->lon + 180.0) / 15.0);
     if (band < 0)
         band = 0;
     if (band > 23)
         band = 23;
     fill(pixels, stride, WC_MAP_X + band * WC_MAP_W / 24, WC_MAP_Y,
-         WC_MAP_W / 24 + 1, WC_MAP_INFO_Y - WC_MAP_Y, PANEL);
+         WC_MAP_W / 24 + 1, WC_MAP_INFO_Y - WC_MAP_Y, blend(BG, ACCENT, 48));
     /* GMT grid: a line every hour of longitude, one every 30 degrees
      * of latitude. */
     for (int k = 0; k <= 24; ++k)
@@ -1106,28 +1113,39 @@ static void draw_world_clock_map(struct app *app, uint32_t *pixels, unsigned str
     static const int lats[] = {60, 30, 0, -30};
     for (unsigned i = 0; i < sizeof lats / sizeof lats[0]; ++i)
         fill(pixels, stride, WC_MAP_X, map_py(lats[i]), WC_MAP_W, 1, grid);
-    /* Land, then the cities: a muted dot each, the pin in accent. */
-    static const struct { const short (*pts)[2]; int n; } polys[] = {
-        {POLY_NORTH_AMERICA, (int)(sizeof POLY_NORTH_AMERICA / sizeof POLY_NORTH_AMERICA[0])},
-        {POLY_GREENLAND, (int)(sizeof POLY_GREENLAND / sizeof POLY_GREENLAND[0])},
-        {POLY_SOUTH_AMERICA, (int)(sizeof POLY_SOUTH_AMERICA / sizeof POLY_SOUTH_AMERICA[0])},
-        {POLY_EUROPE, (int)(sizeof POLY_EUROPE / sizeof POLY_EUROPE[0])},
-        {POLY_BRITAIN, (int)(sizeof POLY_BRITAIN / sizeof POLY_BRITAIN[0])},
-        {POLY_AFRICA, (int)(sizeof POLY_AFRICA / sizeof POLY_AFRICA[0])},
-        {POLY_ASIA, (int)(sizeof POLY_ASIA / sizeof POLY_ASIA[0])},
-        {POLY_JAPAN, (int)(sizeof POLY_JAPAN / sizeof POLY_JAPAN[0])},
-        {POLY_SUMATRA, (int)(sizeof POLY_SUMATRA / sizeof POLY_SUMATRA[0])},
-        {POLY_BORNEO, (int)(sizeof POLY_BORNEO / sizeof POLY_BORNEO[0])},
-        {POLY_NEW_GUINEA, (int)(sizeof POLY_NEW_GUINEA / sizeof POLY_NEW_GUINEA[0])},
-        {POLY_AUSTRALIA, (int)(sizeof POLY_AUSTRALIA / sizeof POLY_AUSTRALIA[0])},
-        {POLY_NEW_ZEALAND, (int)(sizeof POLY_NEW_ZEALAND / sizeof POLY_NEW_ZEALAND[0])},
+    /* Land in soft atlas colours, one per landmass: teal North America,
+     * ice-blue Greenland, leaf-green South America, lavender Europe,
+     * sandy Africa, rose Asia, tropical green Indonesia / New Guinea,
+     * and ochre Australia / New Zealand. Mid-tone, so the same palette
+     * reads on the light paper and the dark paper. */
+    enum {
+        MAP_NORTH_AMERICA = 0x63b3a5, MAP_GREENLAND = 0x93c4de,
+        MAP_SOUTH_AMERICA = 0x8fc06a, MAP_EUROPE = 0xa58bd0,
+        MAP_AFRICA = 0xd89a4e, MAP_ASIA = 0xd97f7f, MAP_TROPICAL = 0x66bb8a,
+        MAP_OCEANIA = 0xcfa53b
+    };
+    static const struct { const short (*pts)[2]; int n; uint32_t color; } polys[] = {
+        {POLY_NORTH_AMERICA, (int)(sizeof POLY_NORTH_AMERICA / sizeof POLY_NORTH_AMERICA[0]), MAP_NORTH_AMERICA},
+        {POLY_HAWAII, (int)(sizeof POLY_HAWAII / sizeof POLY_HAWAII[0]), MAP_NORTH_AMERICA},
+        {POLY_GREENLAND, (int)(sizeof POLY_GREENLAND / sizeof POLY_GREENLAND[0]), MAP_GREENLAND},
+        {POLY_SOUTH_AMERICA, (int)(sizeof POLY_SOUTH_AMERICA / sizeof POLY_SOUTH_AMERICA[0]), MAP_SOUTH_AMERICA},
+        {POLY_EUROPE, (int)(sizeof POLY_EUROPE / sizeof POLY_EUROPE[0]), MAP_EUROPE},
+        {POLY_BRITAIN, (int)(sizeof POLY_BRITAIN / sizeof POLY_BRITAIN[0]), MAP_EUROPE},
+        {POLY_AFRICA, (int)(sizeof POLY_AFRICA / sizeof POLY_AFRICA[0]), MAP_AFRICA},
+        {POLY_ASIA, (int)(sizeof POLY_ASIA / sizeof POLY_ASIA[0]), MAP_ASIA},
+        {POLY_JAPAN, (int)(sizeof POLY_JAPAN / sizeof POLY_JAPAN[0]), MAP_ASIA},
+        {POLY_SUMATRA, (int)(sizeof POLY_SUMATRA / sizeof POLY_SUMATRA[0]), MAP_TROPICAL},
+        {POLY_BORNEO, (int)(sizeof POLY_BORNEO / sizeof POLY_BORNEO[0]), MAP_TROPICAL},
+        {POLY_NEW_GUINEA, (int)(sizeof POLY_NEW_GUINEA / sizeof POLY_NEW_GUINEA[0]), MAP_TROPICAL},
+        {POLY_AUSTRALIA, (int)(sizeof POLY_AUSTRALIA / sizeof POLY_AUSTRALIA[0]), MAP_OCEANIA},
+        {POLY_NEW_ZEALAND, (int)(sizeof POLY_NEW_ZEALAND / sizeof POLY_NEW_ZEALAND[0]), MAP_OCEANIA},
     };
     for (unsigned i = 0; i < sizeof polys / sizeof polys[0]; ++i)
-        fill_poly(pixels, stride, polys[i].pts, polys[i].n, INK);
+        fill_poly(pixels, stride, polys[i].pts, polys[i].n, polys[i].color);
     outline(pixels, stride, WC_MAP_X - 1, WC_MAP_Y - 1, WC_MAP_W + 2, WC_MAP_H + 2, grid);
     for (int i = 0; i < WC_CITY_COUNT; ++i)
         fill(pixels, stride, map_px(WC_CITIES[i].lon) - 1, map_py(WC_CITIES[i].lat) - 1,
-             3, 3, MUTED);
+             3, 3, INK);
     disc(pixels, stride, map_px(city->lon), map_py(city->lat), 6, BG);
     disc(pixels, stride, map_px(city->lon), map_py(city->lat), 5, ACCENT);
     disc(pixels, stride, map_px(city->lon), map_py(city->lat), 2, BG);

@@ -86,6 +86,14 @@ static void worldclock(void)
     assert(app.wc_map == 2);
     tap(328, 88, 0); /* Tokyo on the map: lon 139.7, lat 35.7 */
     assert(app.wc_map == 13);
+    /* The wheel walks every time zone: 2 more east to Auckland, a full
+     * sweep west end to end to Honolulu, and back east to Tokyo. */
+    send("w -18", 0);
+    assert(app.wc_map == 15);
+    send("w 135", 0);
+    assert(app.wc_map == 0);
+    send("w -117", 0);
+    assert(app.wc_map == 13);
     send("k u 218", 0); /* Centre -> Tokyo detail */
     assert(app.screen == WC_DETAIL && app.wc_selected == 13);
     back(); /* -> WORLD_CLOCK, focused on Tokyo */
