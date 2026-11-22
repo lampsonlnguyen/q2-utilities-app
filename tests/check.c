@@ -52,7 +52,8 @@ static void calendar(void)
     send("w -9", 0);
     send("k u 218", 0);
     assert(app.screen == CALENDAR && app.year == 2024 && app.month == 1);
-    assert(pixels[220 * HEIGHT + HEIGHT - 1 - 199] == 0xffeeeeec);
+    /* Minimal dark: today is the card fill (0x2b2b2b) in its new grid cell. */
+    assert(pixels[235 * HEIGHT + HEIGHT - 1 - 176] == 0xff2b2b2b);
     for (int i = 0; i < 10; ++i)
         tap(50, 252, 0);
     assert(app.year == 2023 && app.month == 3);
@@ -63,27 +64,27 @@ static void calendar(void)
 
 static void tasks(const char *path)
 {
-    tap(50, 145, 0);
+    tap(50, 106, 0); /* To-do row: y=90..121 */
     tap(50, 250, 0);
     assert(app.screen == EDIT_TASK);
     tap(25, 105, 0); /* A */
     tap(295, 250, 0);
     assert(app.screen == TODO && app.task_count == 1);
-    tap(50, 55, 0);
-    tap(50, 121, 0);
+    tap(50, 42, 0); /* task row 0: y=26..57 */
+    tap(50, 82, 0);  /* Mark done row: y=66..97 */
     app_init(&app, path);
     assert(app.task_count == 1 && app.tasks[0].done && !strcmp(app.tasks[0].text, "A"));
 
-    tap(50, 145, 0);
-    tap(50, 55, 0);
-    tap(50, 180, 0);
+    tap(50, 106, 0);
+    tap(50, 42, 0);
+    tap(50, 114, 0); /* Delete task row: y=98..129 */
     app_init(&app, path);
     assert(app.task_count == 0);
 }
 
 static void calculator(void)
 {
-    tap(50, 185, 0);
+    tap(50, 138, 0); /* Calculator row: y=122..153 */
     tap(50, 105, 0);  /* 7 */
     tap(300, 105, 0); /* / */
     tap(50, 180, 0);  /* 1 */
@@ -107,10 +108,18 @@ static void theme(void)
     app_theme("[OTHER]\nLIGHT=0\n[IPOD]\r\nTHEME=2\r\nACCENT=4\r\nLIGHT=1\r\n", 12);
     app_draw(&app,pixels,HEIGHT,0,&today);
     assert(pixels[0]==0xfff4f4f4);
-    assert(pixels[20*HEIGHT+HEIGHT-1-58]==0xff2a6ad8);
+    /* Modern light: selected HOME row is the flat Cobalt bar (y=26..57). */
+    assert(pixels[20*HEIGHT+HEIGHT-1-42]==0xff2a6ad8);
+    /* Modern light bar is flat 0xdedede at the top. */
+    assert(pixels[187*HEIGHT+HEIGHT-1]==0xffdedede);
     app_theme("[IPOD]\nTHEME=1\nCLASSIC_LIGHT_ACCENT=0\nLIGHT=2\n",7);
     app_draw(&app,pixels,HEIGHT,0,&today);
     assert(pixels[0]==0xffffffff);
+    /* Classic Blue: gloss bar on top, gloss band top/bottom lines on the
+     * selected row (y=26 top line, y=57 bottom line). */
+    assert(pixels[187*HEIGHT+HEIGHT-1]==0xffffffff);
+    assert(pixels[20*HEIGHT+HEIGHT-1-26]==0xff94c7de);
+    assert(pixels[20*HEIGHT+HEIGHT-1-57]==0xff004184);
     app_theme("[IPOD]\nLIGHT=2\n",19);
     app_draw(&app,pixels,HEIGHT,0,&today);
     assert(pixels[0]==0xff000000);

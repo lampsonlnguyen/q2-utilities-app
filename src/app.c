@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 #include "app.h"
+#include "q2pod_scheme.h"
 
 #include <errno.h>
 #include <math.h>
@@ -11,6 +12,9 @@
 /* Q2 Pod theme IDs/accent colors: assets/themes and patch/offsets.inc. */
 static uint32_t BG=0, PANEL=0x191919, INK=0xeeeeec, MUTED=0x949294,
                 ACCENT=0xeeeeec, SELECT=0xeeeeec, SELECT_INK=0x161616;
+/* The resolved q2-pod scheme (src/q2pod_scheme.c): bar gradient, selection
+ * painter and surfaces for the parsed theme, accent and light/dark half. */
+static Q2PodScheme SCHEME;
 static int config_number(const char *config, const char *key, int fallback, int limit) {
     int ipod=0;
     while (*config) {
@@ -54,17 +58,23 @@ void app_theme(const char *config, int hour)
         0x447cdd,0xcb681e,0x9d4f7a,0xd8d8d8,0x778e4c};
     int theme=config_number(config,"THEME",0,3);
     const char *key=theme==0?"MINIMAL_ACCENT":theme==1?"CLASSIC_LIGHT_ACCENT":"ACCENT";
-    int accent=config_number(config,key,0,9);
+    int raw_accent=config_number(config,key,0,9);
+    int accent=raw_accent;
     if(theme==1)
         accent=accent==0?4:accent==8?8:accent-1;
     else if(theme==2 && accent==7)
         accent=0;
     int mode=config_number(config,"LIGHT",0,3);
     bool light=mode==1 || (mode==2 && hour>=7 && hour<19);
-    BG=light?(theme==1?0xffffff:0xf4f4f4):0;
+    /* Classic accent 0 is Classic Blue, its own gloss band (accent 9 in
+     * q2pod_scheme); the other Classic values follow the flat mapping
+     * above. Minimal/Modern use the mapped accent. */
+    q2pod_scheme_resolve(theme, theme==1 ? (raw_accent==0 ? 9 : accent) : accent,
+                         light, &SCHEME);
+    BG=SCHEME.paper;
     PANEL=light?0xe7e7e7:0x191919;
-    INK=light?(theme==1?0:0x161616):0xeeeeec;
-    MUTED=light?0x606060:0x949294;
+    INK=SCHEME.ink;
+    MUTED=SCHEME.muted;
     SELECT=accents[accent]; SELECT_INK=0xffffff;
     ACCENT=light?accents[accent]:bright[accent];
     if(theme==0 && (accent==0 || accent==7)) {
@@ -87,6 +97,11 @@ struct layout {
 
 static const char *const titles[] = {
     "Utilities", "Stopwatch", "Calendar", "To-do", "Calculator", "New task", "Task options"
+};
+
+static const char *const months[] = {
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
 };
 
 static void screen(struct app *app, enum screen next)
@@ -271,8 +286,9 @@ static void make_layout(const struct app *app, struct layout *layout)
     layout->count = 0;
     switch (app->screen) {
     case HOME:
+        /* q2-pod lists: 32 px full-width rows from below the 26 px bar. */
         for (int i = STOPWATCH; i <= CALCULATOR; ++i)
-            button(layout, 18, 56 + (i - 1) * 38, 339, 34, i, titles[i]);
+            button(layout, 0, 26 + (i - 1) * 32, WIDTH, 32, i, titles[i]);
         break;
     case STOPWATCH:
         button(layout, 18, 127, 108, 39, 0, app->running ? "Pause" : "Start");
@@ -289,7 +305,7 @@ static void make_layout(const struct app *app, struct layout *layout)
         for (int i = start; i < app->task_count && i < start + TASKS_PER_PAGE; ++i) {
             char label[32];
             snprintf(label, sizeof label, "[%c] %s", app->tasks[i].done ? 'X' : ' ', app->tasks[i].text);
-            button(layout, 18, 50 + (i - start) * 37, 339, 32, i, label);
+            button(layout, 0, 26 + (i - start) * 32, WIDTH, 32, i, label);
         }
         if (app->task_count < TASK_LIMIT)
             button(layout, 18, 243, 130, 44, -1, "+ New task");
@@ -300,9 +316,10 @@ static void make_layout(const struct app *app, struct layout *layout)
         break;
     }
     case TASK_ACTIONS:
-        button(layout, 18, 111, 339, 48, 0,
+        /* List rows below the task text (drawn at y=36). */
+        button(layout, 0, 66, WIDTH, 32, 0,
                app->tasks[app->task_index].done ? "Mark open" : "Mark done");
-        button(layout, 18, 168, 339, 48, 1, "Delete task");
+        button(layout, 0, 98, WIDTH, 32, 1, "Delete task");
         break;
     case EDIT_TASK: {
         const char *keys = app->symbols ? "0123456789.,!?-+/:@#&()'" : "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -549,29 +566,127 @@ static void centered(uint32_t *pixels, unsigned stride, int x, int y, int w, con
     draw_text(pixels, stride, x + (offset > 0 ? offset : 0), y, text, color);
 }
 
+/* --- q2-pod list painters (bar gradient, selection, chevron) --- */
+
+static uint32_t lerp_channel(int a, int b, int num, int den)
+{
+    /* Signed: most stops darken, so (b - a) is negative and must not wrap. */
+    return (uint32_t)(a + (b - a) * num / den);
+}
+
+static uint32_t lerp_color(uint32_t a, uint32_t b, int num, int den)
+{
+    return (lerp_channel(a >> 16 & 255, b >> 16 & 255, num, den) << 16) |
+           (lerp_channel(a >> 8 & 255, b >> 8 & 255, num, den) << 8) |
+           lerp_channel(a & 255, b & 255, num, den);
+}
+
+/* Vertical gradient through the scheme's stops (positions 0-100). */
+static void vgrad(uint32_t *pixels, unsigned stride, int x, int y, int w, int h,
+                  const Q2PodStop *stops, int count)
+{
+    for (int yy = 0; yy < h; ++yy) {
+        int t = h <= 1 ? 0 : yy * 100 / (h - 1);
+        uint32_t color = stops[count - 1].rgb;
+        for (int i = 0; i + 1 < count; ++i) {
+            if (t >= stops[i].pos && t <= stops[i + 1].pos) {
+                int den = stops[i + 1].pos - stops[i].pos;
+                color = den ? lerp_color(stops[i].rgb, stops[i + 1].rgb,
+                                         t - stops[i].pos, den) : stops[i].rgb;
+                break;
+            }
+        }
+        fill(pixels, stride, x, y + yy, w, 1, color);
+    }
+}
+
+static void outline(uint32_t *pixels, unsigned stride, int x, int y, int w, int h, uint32_t color)
+{
+    fill(pixels, stride, x, y, w, 1, color);
+    fill(pixels, stride, x, y + h - 1, w, 1, color);
+    fill(pixels, stride, x, y, 1, h, color);
+    fill(pixels, stride, x + w - 1, y, 1, h, color);
+}
+
+/* Text colour on a selection: the scheme's sel_text, or the row's own ink
+ * when the painter keeps it (Minimal's card). */
+static uint32_t sel_text_color(void)
+{
+    return SCHEME.sel_text ? SCHEME.sel_text : INK;
+}
+
+/* Paint the theme's selection over a rectangle: Classic's gloss band,
+ * Modern's flat accent bar, Minimal's card fill + outline. */
+static void paint_selection(uint32_t *pixels, unsigned stride, int x, int y, int w, int h)
+{
+    if (SCHEME.painter == Q2POD_SEL_STOPS) {
+        vgrad(pixels, stride, x, y, w, h, SCHEME.sel, Q2POD_GLOSS_STOPS);
+        fill(pixels, stride, x, y, w, 1, SCHEME.sel_top);
+        fill(pixels, stride, x, y + h - 1, w, 1, SCHEME.sel_edge);
+    } else if (SCHEME.painter == Q2POD_SEL_BAR) {
+        fill(pixels, stride, x, y, w, h, SCHEME.accent_top);
+    } else {
+        fill(pixels, stride, x, y, w, h, SCHEME.fill);
+        uint32_t edge = SCHEME.paper == 0 ? 0xeeeeecu : 0x424242u;
+        outline(pixels, stride, x, y, w, h, edge);
+        outline(pixels, stride, x + 1, y + 1, w - 2, h - 2, edge);
+    }
+}
+
+/* Paint one list row: the selection above when focused, otherwise the
+ * theme's unselected row (Classic hairline, Minimal card, Modern flat). */
+static void paint_list_row(uint32_t *pixels, unsigned stride, const struct button *item, bool selected)
+{
+    if (selected) {
+        if (SCHEME.painter == Q2POD_SEL_CARD) {
+            /* Minimal's card: inset rounded look, accent dot, 2 px outline. */
+            int cx = 14, cw = WIDTH - 28;
+            fill(pixels, stride, cx, item->y + 3, cw, item->h - 6, SCHEME.fill);
+            uint32_t edge = SCHEME.paper == 0 ? 0xeeeeecu : 0x424242u;
+            outline(pixels, stride, cx, item->y + 3, cw, item->h - 6, edge);
+            outline(pixels, stride, cx + 1, item->y + 4, cw - 2, item->h - 8, edge);
+            fill(pixels, stride, 24, item->y + item->h / 2 - 4, 8, 8, edge);
+        } else {
+            paint_selection(pixels, stride, item->x, item->y, item->w, item->h);
+        }
+        return;
+    }
+    if (SCHEME.painter == Q2POD_SEL_STOPS) {
+        uint32_t hair = SCHEME.paper == 0 ? 0x333333u : 0xe2e3e2u;
+        fill(pixels, stride, item->x, item->y + item->h - 1, item->w, 1, hair);
+    } else if (SCHEME.painter == Q2POD_SEL_CARD) {
+        int cx = 14, cw = WIDTH - 28;
+        fill(pixels, stride, cx, item->y + 3, cw, item->h - 6, SCHEME.fill);
+        outline(pixels, stride, cx, item->y + 3, cw, item->h - 6,
+                SCHEME.paper == 0 ? 0x444444u : 0xe8e8e8u);
+    }
+}
+
+/* Upper-case a title in place (Minimal's bar and rows are small capitals). */
+static void upper(char *text)
+{
+    for (; *text; ++text)
+        if (*text >= 'a' && *text <= 'z')
+            *text -= 'a' - 'A';
+}
+
 static void draw_calendar(const struct app *app, uint32_t *pixels, unsigned stride, const struct tm *today)
 {
-    static const char *const months[] = {
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
-    };
     static const char *const weekdays[] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
     char label[32];
-    snprintf(label, sizeof label, "%s %d", months[app->month], app->year);
-    centered(pixels, stride, 18, 44, 339, label, INK);
     for (int i = 0; i < 7; ++i)
-        centered(pixels, stride, 19 + i * 48, 72, 48, weekdays[i], MUTED);
+        centered(pixels, stride, 19 + i * 48, 44, 48, weekdays[i], MUTED);
     int first = first_weekday(app->year, app->month);
     int days = days_in_month(app->year, app->month);
     bool current_month = app->year == today->tm_year + 1900 && app->month == today->tm_mon;
     for (int day = 1; day <= days; ++day) {
         int cell = first + day - 1;
-        int x = 19 + cell % 7 * 48, y = 96 + cell / 7 * 24;
+        int x = 19 + cell % 7 * 48, y = 68 + cell / 7 * 24;
         bool current = current_month && day == today->tm_mday;
         if (current)
-            fill(pixels, stride, x + 9, y, 30, 24, SELECT);
+            paint_selection(pixels, stride, x + 9, y, 30, 24);
         snprintf(label, sizeof label, "%d", day);
-        centered(pixels, stride, x, y, 48, label, current ? SELECT_INK : INK);
+        centered(pixels, stride, x, y, 48, label, current ? sel_text_color() : INK);
     }
 }
 
@@ -580,8 +695,22 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
     struct layout layout;
     make_layout(app, &layout);
     fill(pixels, stride, 0, 0, WIDTH, HEIGHT, BG);
-    fill(pixels, stride, 18, 39, 339, 2, PANEL);
-    centered(pixels, stride, 0, 10, WIDTH, titles[app->screen], INK);
+    /* q2-pod's 26 px status bar: the theme's gloss/flat bar, its bottom
+     * line, the screen title (the calendar's month + year) and < Back. */
+    vgrad(pixels, stride, 0, 0, WIDTH, Q2POD_BAR_H, SCHEME.bar, Q2POD_BAR_STOPS);
+    if (SCHEME.bar_line2)
+        fill(pixels, stride, 0, Q2POD_BAR_H - 2, WIDTH, 1, SCHEME.bar_line2);
+    fill(pixels, stride, 0, Q2POD_BAR_H - 1, WIDTH, 1, SCHEME.bar_line);
+    char title[32];
+    if (app->screen == CALENDAR)
+        snprintf(title, sizeof title, "%s %d", months[app->month], app->year);
+    else
+        snprintf(title, sizeof title, "%s", titles[app->screen]);
+    if (SCHEME.caps_bar)
+        upper(title);
+    if (app->screen != HOME)
+        draw_text(pixels, stride, 10, 3, "< Back", INK);
+    centered(pixels, stride, 0, 3, WIDTH, title, INK);
     char value[64];
 
     switch (app->screen) {
@@ -600,22 +729,22 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
         break;
     case TODO:
         if (!app->task_count)
-            draw_text(pixels, stride, 18, 70, "No tasks yet", MUTED);
+            draw_text(pixels, stride, 18, 44, "No tasks yet", MUTED);
         break;
     case TASK_ACTIONS:
-        draw_text(pixels, stride, 18, 66, app->tasks[app->task_index].text, INK);
+        draw_text(pixels, stride, 20, 36, app->tasks[app->task_index].text, INK);
         break;
     case EDIT_TASK:
-        fill(pixels, stride, 18, 50, 339, 39, PANEL);
-        draw_text_fitted(pixels, stride, 28, 57, 319, app->draft[0] ? app->draft : "Task name", app->draft[0] ? INK : MUTED);
+        fill(pixels, stride, 18, 36, 339, 30, PANEL);
+        draw_text_fitted(pixels, stride, 28, 43, 319, app->draft[0] ? app->draft : "Task name", app->draft[0] ? INK : MUTED);
         break;
     case CALCULATOR:
-        fill(pixels, stride, 18, 46, 339, 42, PANEL);
+        fill(pixels, stride, 18, 34, 339, 36, PANEL);
         if (app->op && !app->error) {
             snprintf(value, sizeof value, "%c", app->op);
-            draw_text(pixels, stride, 30, 55, value, MUTED);
+            draw_text(pixels, stride, 30, 43, value, MUTED);
         }
-        draw_text(pixels, stride, 345 - text_width(app->number), 55, app->number, INK);
+        draw_text(pixels, stride, 345 - text_width(app->number), 43, app->number, INK);
         break;
     case HOME:
         break;
@@ -624,12 +753,33 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
     for (int i = 0; i < layout.count; ++i) {
         const struct button *item = &layout.items[i];
         bool selected = i == app->focus;
-        fill(pixels, stride, item->x, item->y, item->w, item->h, selected ? SELECT : PANEL);
-        uint32_t color = selected ? SELECT_INK : INK;
         int y = item->y + (item->h - F20_H) / 2;
-        if (app->screen == HOME || (app->screen == TODO && item->code >= 0))
-            draw_text_fitted(pixels, stride, item->x + 10, y, item->w - 20, item->label, color);
-        else
+        bool list = app->screen == HOME || app->screen == TASK_ACTIONS ||
+                    (app->screen == TODO && item->code >= 0);
+        if (list) {
+            /* System list rows: theme selection painter, theme text
+             * edge, chevron on the selected row only. */
+            paint_list_row(pixels, stride, item, selected);
+            char label[32];
+            snprintf(label, sizeof label, "%s", item->label);
+            if (SCHEME.caps_rows)
+                upper(label);
+            uint32_t color = selected ? sel_text_color() : INK;
+            draw_text_fitted(pixels, stride, SCHEME.text_x, y,
+                             WIDTH - SCHEME.text_x - 40, label, color);
+            if (selected)
+                draw_text(pixels, stride, 322, y, ">",
+                          SCHEME.painter == Q2POD_SEL_CARD ? SCHEME.chevron
+                                                           : sel_text_color());
+        } else {
+            /* Action keys keep their buttons, painted with the theme's
+             * selection when focused instead of a flat fill. */
+            if (selected)
+                paint_selection(pixels, stride, item->x, item->y, item->w, item->h);
+            else
+                fill(pixels, stride, item->x, item->y, item->w, item->h, PANEL);
+            uint32_t color = selected ? sel_text_color() : INK;
             centered(pixels, stride, item->x, y, item->w, item->label, color);
+        }
     }
 }
