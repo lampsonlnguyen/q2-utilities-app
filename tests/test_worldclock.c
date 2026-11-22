@@ -95,6 +95,38 @@ int main(void)
         assert(y == 2026 && mo == 1 && d == 2 && h == 0 && mi == 30);
     }
 
+    /* Map picker: every city has a position, country and abbreviation;
+     * the longitude order is strictly west to east; taps land on the
+     * nearest city, including across the date line. */
+    assert(WC_MAP_COUNT == WC_CITY_COUNT);
+    for (int i = 0; i < WC_CITY_COUNT; ++i) {
+        const struct wc_city *city = &WC_CITIES[i];
+        assert(city->lat >= -60 && city->lat <= 85);
+        assert(city->lon >= -180 && city->lon <= 180);
+        assert(city->country && city->abbr_std);
+        if (i)
+            assert(WC_CITIES[WC_MAP_ORDER[i - 1]].lon < WC_CITIES[WC_MAP_ORDER[i]].lon);
+        assert(wc_map_position(city) >= 0 && wc_map_position(city) < WC_MAP_COUNT);
+        assert(&WC_CITIES[WC_MAP_ORDER[wc_map_position(city)]] == city);
+    }
+    assert(wc_map_position(find("HNL")) == 0);
+    assert(wc_map_position(find("LAX")) == 1);
+    assert(wc_map_position(find("SGN")) == 12);
+    assert(wc_map_position(find("SIN")) == 11);
+    assert(wc_map_position(find("TYO")) == 13);
+    assert(wc_map_position(find("AKL")) == 15);
+    assert(wc_nearest_city(-118.2, 34.0) == find("LAX"));
+    assert(wc_nearest_city(139.7, 35.7) == find("TYO"));
+    assert(wc_nearest_city(-0.1, 51.5) == find("LON"));
+    assert(wc_nearest_city(174.8, -36.9) == find("AKL"));
+    assert(wc_nearest_city(106.6, 10.8) == find("SGN"));
+    assert(wc_nearest_city(103.8, 1.3) == find("SIN"));
+    assert(wc_nearest_city(151.2, -33.9) == find("SYD"));
+    assert(wc_nearest_city(-179.0, -37.0) == find("AKL")); /* date line wrap */
+    assert(wc_nearest_longitude(-100.0) == find("DEN"));
+    assert(wc_nearest_longitude(150.0) == find("SYD"));
+    assert(wc_nearest_longitude(179.0) == find("AKL"));
+
     puts("World Clock checks passed");
     return 0;
 }

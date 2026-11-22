@@ -11,24 +11,82 @@ static const struct wc_rule WC_SYD = {10, 1, 0, 2, 4, 1, 0, 2, true};
 static const struct wc_rule WC_AKL = {9, 5, 0, 2, 4, 1, 0, 2, true};
 
 const struct wc_city WC_CITIES[] = {
-    {"LAX", "Los Angeles", "America/Los_Angeles", -480, &WC_US},
-    {"NYC", "New York", "America/New_York", -300, &WC_US},
-    {"CHI", "Chicago", "America/Chicago", -360, &WC_US},
-    {"DEN", "Denver", "America/Denver", -420, &WC_US},
-    {"HNL", "Honolulu", "Pacific/Honolulu", -600, NULL},
-    {"LON", "London", "Europe/London", 0, &WC_EU_GMT},
-    {"PAR", "Paris", "Europe/Paris", 60, &WC_EU_CET},
-    {"BER", "Berlin", "Europe/Berlin", 60, &WC_EU_CET},
-    {"MOW", "Moscow", "Europe/Moscow", 180, NULL},
-    {"DXB", "Dubai", "Asia/Dubai", 240, NULL},
-    {"BOM", "Mumbai", "Asia/Kolkata", 330, NULL},
-    {"SGN", "Ho Chi Minh City", "Asia/Ho_Chi_Minh", 420, NULL},
-    {"SIN", "Singapore", "Asia/Singapore", 480, NULL},
-    {"TYO", "Tokyo", "Asia/Tokyo", 540, NULL},
-    {"SYD", "Sydney", "Australia/Sydney", 600, &WC_SYD},
-    {"AKL", "Auckland", "Pacific/Auckland", 720, &WC_AKL},
+    {"LAX", "Los Angeles", "America/Los_Angeles", -480, &WC_US, 34.05, -118.24, "United States", "PST", "PDT"},
+    {"NYC", "New York", "America/New_York", -300, &WC_US, 40.71, -74.01, "United States", "EST", "EDT"},
+    {"CHI", "Chicago", "America/Chicago", -360, &WC_US, 41.88, -87.63, "United States", "CST", "CDT"},
+    {"DEN", "Denver", "America/Denver", -420, &WC_US, 39.74, -104.99, "United States", "MST", "MDT"},
+    {"HNL", "Honolulu", "Pacific/Honolulu", -600, NULL, 21.31, -157.86, "United States", "HST", NULL},
+    {"LON", "London", "Europe/London", 0, &WC_EU_GMT, 51.51, -0.13, "United Kingdom", "GMT", "BST"},
+    {"PAR", "Paris", "Europe/Paris", 60, &WC_EU_CET, 48.85, 2.35, "France", "CET", "CEST"},
+    {"BER", "Berlin", "Europe/Berlin", 60, &WC_EU_CET, 52.52, 13.40, "Germany", "CET", "CEST"},
+    {"MOW", "Moscow", "Europe/Moscow", 180, NULL, 55.76, 37.62, "Russia", "MSK", NULL},
+    {"DXB", "Dubai", "Asia/Dubai", 240, NULL, 25.20, 55.27, "United Arab Emirates", "GST", NULL},
+    {"BOM", "Mumbai", "Asia/Kolkata", 330, NULL, 19.08, 72.88, "India", "IST", NULL},
+    {"SGN", "Ho Chi Minh City", "Asia/Ho_Chi_Minh", 420, NULL, 10.82, 106.63, "Vietnam", "ICT", NULL},
+    {"SIN", "Singapore", "Asia/Singapore", 480, NULL, 1.35, 103.82, "Singapore", "SGT", NULL},
+    {"TYO", "Tokyo", "Asia/Tokyo", 540, NULL, 35.68, 139.69, "Japan", "JST", NULL},
+    {"SYD", "Sydney", "Australia/Sydney", 600, &WC_SYD, -33.87, 151.21, "Australia", "AEST", "AEDT"},
+    {"AKL", "Auckland", "Pacific/Auckland", 720, &WC_AKL, -36.85, 174.76, "New Zealand", "NZST", "NZDT"},
 };
 const int WC_CITY_COUNT = (int)(sizeof WC_CITIES / sizeof WC_CITIES[0]);
+
+/* West to east: HNL, LAX, DEN, CHI, NYC, LON, PAR, BER, MOW, DXB, BOM,
+ * SIN, SGN, TYO, SYD, AKL. Singapore (103.82E) sits just west of
+ * Ho Chi Minh City (106.63E). */
+const int WC_MAP_ORDER[] = {4, 0, 3, 2, 1, 5, 6, 7, 8, 9, 10, 12, 11, 13, 14, 15};
+const int WC_MAP_COUNT = (int)(sizeof WC_MAP_ORDER / sizeof WC_MAP_ORDER[0]);
+
+int wc_map_position(const struct wc_city *city)
+{
+    for (int i = 0; i < WC_MAP_COUNT; ++i)
+        if (&WC_CITIES[WC_MAP_ORDER[i]] == city)
+            return i;
+    return 0;
+}
+
+static double wrap_lon(double dlon)
+{
+    while (dlon > 180.0)
+        dlon -= 360.0;
+    while (dlon < -180.0)
+        dlon += 360.0;
+    return dlon;
+}
+
+const struct wc_city *wc_nearest_city(double lon, double lat)
+{
+    /* Plain equirectangular distance, longitude wrapped at the date
+     * line. The cities are far apart, so no cos(lat) scaling is needed
+     * to tell them apart; this also keeps libm out of the Q2 build. */
+    const struct wc_city *best = &WC_CITIES[0];
+    double best_d2 = 1e30;
+    for (int i = 0; i < WC_CITY_COUNT; ++i) {
+        double dx = wrap_lon(WC_CITIES[i].lon - lon);
+        double dy = WC_CITIES[i].lat - lat;
+        double d2 = dx * dx + dy * dy;
+        if (d2 < best_d2) {
+            best_d2 = d2;
+            best = &WC_CITIES[i];
+        }
+    }
+    return best;
+}
+
+const struct wc_city *wc_nearest_longitude(double lon)
+{
+    const struct wc_city *best = &WC_CITIES[0];
+    double best_d = 1e30;
+    for (int i = 0; i < WC_CITY_COUNT; ++i) {
+        double d = wrap_lon(WC_CITIES[i].lon - lon);
+        if (d < 0)
+            d = -d;
+        if (d < best_d) {
+            best_d = d;
+            best = &WC_CITIES[i];
+        }
+    }
+    return best;
+}
 
 int64_t wc_days_from_civil(int year, unsigned month, unsigned day)
 {
