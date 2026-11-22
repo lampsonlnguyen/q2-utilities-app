@@ -33,7 +33,7 @@ pins those transitions. If a government changes a rule, the table needs
 updating — the app cannot learn it from the device. Adding or removing
 cities is a one-line change to the `WC_CITIES` table in the same file.
 
-Turn the clickwheel to move the highlight and press Centre to select. You can also tap a button. Press Return to go back, or press it from the Utilities menu to exit. Q2 Pod also handles holding Return to close the app. Stopwatch and calculator state reset when the app closes. Q2 Pod may close an idle card app after two minutes unless Smart Awake is enabled.
+Turn the clickwheel to move the highlight and press Centre to select. Utilities uses the Wheel Sensitivity saved in Q2 Pod System settings. You can also tap a button. Press Return to go back, or press it from the Utilities menu to exit. Q2 Pod also handles holding Return to close the app. Stopwatch and calculator state reset when the app closes. Q2 Pod may close an idle card app after two minutes unless Smart Awake is enabled.
 
 ## Build and install
 
@@ -66,7 +66,7 @@ The store derives the app ID `utilities-app` from this repository name. The ZIP 
 
 ## Appearance
 
-Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including each theme’s accent and Light Mode. It reads `/mnt/data/config.ini` when opened; reopen Utilities after changing your theme. Auto Light Mode uses the device’s local clock (light from 07:00 to 19:00) and updates while the app is open. The interface is drawn as q2-pod lists: a 26-pixel status bar with the screen title (and `< Back` on sub-pages), 32-pixel rows from below the bar, the theme's own selection painter (Minimal card, Classic gloss band, Modern accent bar), and a chevron on the selected row. The Stopwatch, Calendar, To-do, and Calculator pages use the same bar and row painting; the calendar's month and year move into the title bar and today is marked with the selection. World Clock uses 52-pixel two-line rows instead of 32-pixel rows so each city fits its time, date, offset, and day/night, with the same bar, selection painter, and chevron. No theme artwork or image files are loaded. Missing settings default to Minimal, Graphite, and dark mode.
+Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including each theme’s accent and Light Mode. It reads `/mnt/data/config.ini` when opened; reopen Utilities after changing your theme. Auto Light Mode uses the device’s local clock (light from 07:00 to 19:00) and updates while the app is open. The interface is drawn as q2-pod lists: a 26-pixel status bar with the screen title, 32-pixel rows from below the bar, the theme's own selection painter (Minimal card, Classic gloss band, Modern accent bar), and a chevron on the selected row. The Stopwatch, Calendar, To-do, and Calculator pages use the same bar and row painting; the calendar's month and year move into the title bar and today is marked with the selection. World Clock uses 52-pixel two-line rows instead of 32-pixel rows so each city fits its time, date, offset, and day/night, with the same bar, selection painter, and chevron. No theme artwork or image files are loaded. Missing settings default to Minimal, Graphite, and dark mode.
 
 The bottom of the screen is kept clear, without footer text.
 

@@ -33,9 +33,37 @@ static void back(void)
     send("k u 170", 5000);
 }
 
+static void controls(void)
+{
+    send("w -27", 0);
+    assert(app.focus == 0);
+    send("w -1", 0);
+    assert(app.focus == 1);
+    send("w 28", 0);
+    assert(app.focus == 0);
+
+    app_wheel_config(&app, "[Q2POD]\nWHEELSENSITIVITY=100\n");
+    send("w -13", 0);
+    assert(app.focus == 0);
+    send("w -1", 0);
+    assert(app.focus == 1);
+    send("w 14", 0);
+    assert(app.focus == 0);
+
+    app_wheel_config(&app, "[Q2POD]\nWHEELSENSITIVITY=55\n");
+    send("w -27", 0);
+    assert(app.focus == 0);
+    send("w 28", 0); /* reversing discards partial travel */
+    assert(app.focus == 4);
+    send("w -28", 0);
+    assert(app.focus == 0);
+}
+
 static void stopwatch(void)
 {
     send("k u 218", 0);
+    assert(app.screen == STOPWATCH);
+    tap(25, 12, 0);
     assert(app.screen == STOPWATCH);
     tap(55, 140, 100);
     tap(174, 140, 1600);
@@ -71,9 +99,9 @@ static void worldclock(void)
     app_theme("[IPOD]\nTHEME=1\nCLASSIC_LIGHT_ACCENT=0\nLIGHT=1\n", 12);
     app_draw(&app, pixels, HEIGHT, 0, UTC, &today);
     assert(pixels[20 * HEIGHT + HEIGHT - 1 - 26] == 0xff94c7de);
-    send("w -90", 0); /* 10 steps down the 16-city list */
-    assert(app.focus == 10 && app.wc_top == 6);
-    send("w 90", 0);
+    send("w -168", 0); /* six default-sensitivity steps */
+    assert(app.focus == 6 && app.wc_top == 2);
+    send("w 168", 0);
     assert(app.focus == 0 && app.wc_top == 0);
     tap(50, 42, 0); /* first city row -> detail (Los Angeles) */
     assert(app.screen == WC_DETAIL && app.wc_selected == 0);
@@ -155,6 +183,7 @@ int main(void)
     snprintf(path, sizeof path, "%s/tasks.tsv", dir);
     app_init(&app, path);
     theme();
+    controls();
     stopwatch();
     calendar();
     worldclock();
