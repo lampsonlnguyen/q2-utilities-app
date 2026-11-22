@@ -85,7 +85,12 @@ void app_theme(const char *config, int hour)
 }
 
 enum { RETURN_KEY = 170, CENTRE_KEY = 218, WHEEL_STEP = 9, TASKS_PER_PAGE = 5,
-       WC_ROW_H = 52, WC_ROWS = 5 };
+       WC_ROW_H = 52, WC_ROWS = 5,
+       /* Tiny world map (WC_MAP): equirectangular, lon -180..180 across,
+        * lat 84..-58 down, so 1 degree is about 1 pixel each way. */
+       WC_MAP_X = 6, WC_MAP_Y = 30, WC_MAP_W = 363, WC_MAP_H = 170,
+       WC_MAP_LAT_TOP = 84, WC_MAP_LAT_SPAN = 142,
+       WC_MAP_STRIP_Y = 202, WC_MAP_INFO_Y = 230, WC_MAP_HINT_Y = 297 };
 
 struct button {
     int x, y, w, h, code;
@@ -99,7 +104,7 @@ struct layout {
 
 static const char *const titles[] = {
     "Utilities", "Stopwatch", "Calendar", "To-do", "Calculator",
-    "World Clock", "World Clock", "New task", "Task options"
+    "World Clock", "World Clock", "New task", "Task options", "World map"
 };
 
 static const char *const months[] = {
@@ -301,14 +306,20 @@ static void make_layout(const struct app *app, struct layout *layout)
     }
     case WORLD_CLOCK: {
         /* 52 px detail rows (GNOME Clocks-style two-line rows): five
-         * visible at a time, the list scrolls under the focus. */
+         * visible at a time, the list scrolls under the focus. The
+         * 34 px strip below the rows opens the world map picker. */
         for (int i = 0; i < WC_ROWS && app->wc_top + i < WC_CITY_COUNT; ++i)
             button(layout, 0, 26 + i * WC_ROW_H, WIDTH, WC_ROW_H,
                    app->wc_top + i, "");
+        button(layout, 0, 26 + WC_ROWS * WC_ROW_H, WIDTH,
+               HEIGHT - 26 - WC_ROWS * WC_ROW_H, WC_CITY_COUNT, "World map");
         break;
     }
     case WC_DETAIL:
         /* Detail view has no buttons; Return goes back to the list. */
+        break;
+    case WC_MAP:
+        /* The map picker has no list buttons; its input is separate. */
         break;
     case STOPWATCH:
         button(layout, 18, 127, 108, 39, 0, app->running ? "Pause" : "Start");
@@ -449,11 +460,21 @@ static void activate(struct app *app, int code, int64_t now, const struct tm *to
             set_today(app, today);
         break;
     case WORLD_CLOCK:
+        if (code == WC_CITY_COUNT) {
+            /* The footer button: open the map on the city the list was
+             * on (wc_selected tracks the focused city; LAX at first). */
+            int pos = wc_map_position(&WC_CITIES[app->wc_selected]);
+            screen(app, WC_MAP);
+            app->wc_map = pos;
+            break;
+        }
         /* code is the city index: open its detail view. */
         app->wc_selected = code;
         screen(app, WC_DETAIL);
         break;
     case WC_DETAIL:
+        break;
+    case WC_MAP:
         break;
     case TODO:
         if (code == -1) {
@@ -485,8 +506,9 @@ static int hit(const struct layout *layout, int x, int y)
     return -1;
 }
 
-/* World Clock input: focus is the city index (0..15), not the visible
- * row, and the 5-row window scrolls under it. */
+/* World Clock input: focus is the city index (0..15), or WC_CITY_COUNT
+ * for the World map footer button, and the 5-row window scrolls under
+ * it. wc_selected tracks the focused city so the map picker opens on it. */
 static void world_clock_input(struct app *app, const char *message, int64_t now)
 {
     struct layout layout;
@@ -502,8 +524,10 @@ static void world_clock_input(struct app *app, const char *message, int64_t now)
         app->focus -= step;
         if (app->focus < 0)
             app->focus = 0;
-        if (app->focus >= WC_CITY_COUNT)
-            app->focus = WC_CITY_COUNT - 1;
+        if (app->focus > WC_CITY_COUNT)
+            app->focus = WC_CITY_COUNT;
+        if (app->focus < WC_CITY_COUNT)
+            app->wc_selected = app->focus;
         if (app->focus < app->wc_top)
             app->wc_top = app->focus;
         if (app->focus >= app->wc_top + WC_ROWS)
@@ -517,6 +541,8 @@ static void world_clock_input(struct app *app, const char *message, int64_t now)
             app->touch_button = -1;
             if (pressed) {
                 app->focus = layout.items[index].code;
+                if (app->focus < WC_CITY_COUNT)
+                    app->wc_selected = app->focus;
                 activate(app, app->focus, now, NULL);
             }
         }
@@ -528,10 +554,89 @@ static void world_clock_input(struct app *app, const char *message, int64_t now)
     }
 }
 
+/* World map picker input: the wheel steps the pin west to east through
+ * the cities in longitude order (wc_map is a WC_MAP_ORDER position).
+ * A tap on the map moves the pin to the nearest city, a tap on the GMT
+ * strip below it picks by longitude alone, and a tap on the info panel
+ * (or Centre) opens that city's detail view. Return goes back to the
+ * list, focused on the pin's city. */
+static int map_lon(int x)
+{
+    return (x - WC_MAP_X) * 360 / WC_MAP_W - 180;
+}
+
+static double map_lat(int y)
+{
+    return WC_MAP_LAT_TOP - (double)(y - WC_MAP_Y) * WC_MAP_LAT_SPAN / WC_MAP_H;
+}
+
+static void world_clock_map_input(struct app *app, const char *message, int64_t now)
+{
+    char phase;
+    int a, b;
+    if (sscanf(message, "w %d", &a) == 1) {
+        if (a < -200 || a > 200)
+            return;
+        app->wheel += a;
+        int step = app->wheel / WHEEL_STEP;
+        app->wheel %= WHEEL_STEP;
+        app->wc_map -= step;
+        if (app->wc_map < 0)
+            app->wc_map = 0;
+        if (app->wc_map >= WC_MAP_COUNT)
+            app->wc_map = WC_MAP_COUNT - 1;
+    } else if (sscanf(message, "t %c %d %d", &phase, &a, &b) == 3) {
+        /* Touch regions: 0 map, 1 GMT strip, 2 info panel, -1 elsewhere. */
+        int region = -1;
+        if (a >= WC_MAP_X && a < WC_MAP_X + WC_MAP_W &&
+            b >= WC_MAP_Y && b < WC_MAP_Y + WC_MAP_H)
+            region = 0;
+        else if (a >= WC_MAP_X && a < WC_MAP_X + WC_MAP_W &&
+                 b >= WC_MAP_STRIP_Y && b < WC_MAP_INFO_Y)
+            region = 1;
+        else if (b >= WC_MAP_INFO_Y && b < WC_MAP_HINT_Y)
+            region = 2;
+        if (phase == 'd') {
+            app->touch_button = region;
+            return;
+        }
+        if (phase != 'u')
+            return;
+        bool pressed = region >= 0 && region == app->touch_button;
+        app->touch_button = -1;
+        if (!pressed)
+            return;
+        if (region == 0)
+            app->wc_map = wc_map_position(wc_nearest_city(map_lon(a), map_lat(b)));
+        else if (region == 1)
+            app->wc_map = wc_map_position(wc_nearest_longitude(map_lon(a)));
+        else {
+            app->wc_selected = WC_MAP_ORDER[app->wc_map];
+            screen(app, WC_DETAIL);
+        }
+    } else if (sscanf(message, "k %c %d", &phase, &a) == 2 && phase == 'u') {
+        if (a == CENTRE_KEY) {
+            app->wc_selected = WC_MAP_ORDER[app->wc_map];
+            screen(app, WC_DETAIL);
+        } else if (a == RETURN_KEY) {
+            int city = WC_MAP_ORDER[app->wc_map];
+            screen(app, WORLD_CLOCK);
+            app->focus = city;
+            app->wc_selected = city;
+            app->wc_top = city >= WC_ROWS ? city - WC_ROWS + 1 : 0;
+        }
+    }
+    (void)now;
+}
+
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today)
 {
     if (app->screen == WORLD_CLOCK) {
         world_clock_input(app, message, now);
+        return;
+    }
+    if (app->screen == WC_MAP) {
+        world_clock_map_input(app, message, now);
         return;
     }
     struct layout layout;
@@ -563,9 +668,14 @@ void app_input(struct app *app, const char *message, int64_t now, const struct t
         if (a == RETURN_KEY) {
             if (app->screen == HOME)
                 app->quit = true;
-            else if (app->screen == WC_DETAIL)
+            else if (app->screen == WC_DETAIL) {
+                /* Back to the list, focused on the city just viewed. */
                 screen(app, WORLD_CLOCK);
-            else if (app->screen == EDIT_TASK || app->screen == TASK_ACTIONS)
+                app->focus = app->wc_selected;
+                app->wc_top = app->wc_selected >= WC_ROWS
+                                  ? app->wc_selected - WC_ROWS + 1
+                                  : 0;
+            } else if (app->screen == EDIT_TASK || app->screen == TASK_ACTIONS)
                 screen(app, TODO);
             else
                 screen(app, HOME);
@@ -818,6 +928,254 @@ static void draw_world_clock_row(struct app *app, uint32_t *pixels, unsigned str
                   SCHEME.painter == Q2POD_SEL_CARD ? SCHEME.chevron : sel_text_color());
 }
 
+/* --- Tiny world map picker (WC_MAP) ---
+ * The map is drawn from coarse lon/lat continent polygons, filled by a
+ * scanline fill in the map's equirectangular projection (1 degree is
+ * about 1 pixel). No image files are loaded: the Q2 ships no map art
+ * and the card app has no assets. Vertical lines mark the 24 one-hour
+ * GMT bands, the pin city's band is highlighted, and the info panel
+ * below reads like Ubuntu's Date & Time tooltip: city and country,
+ * abbreviation and UTC offset with the local time, then the date and
+ * the difference from Los Angeles. */
+static const short POLY_NORTH_AMERICA[][2] = {
+    {-168, 66}, {-160, 58}, {-153, 58}, {-145, 60}, {-137, 58}, {-130, 54},
+    {-125, 49}, {-124, 40}, {-121, 34}, {-117, 33}, {-114, 29}, {-110, 23},
+    {-105, 20}, {-101, 18}, {-97, 16}, {-94, 16}, {-91, 14}, {-87, 13},
+    {-83, 9}, {-77, 8}, {-80, 10}, {-83, 11}, {-86, 12}, {-88, 15},
+    {-88, 17}, {-90, 21}, {-94, 18}, {-97, 19}, {-97, 22}, {-97, 26},
+    {-93, 30}, {-89, 30}, {-84, 30}, {-81, 26}, {-80, 32}, {-76, 35},
+    {-74, 40}, {-70, 42}, {-66, 45}, {-60, 47}, {-55, 52}, {-59, 55},
+    {-64, 58}, {-68, 58}, {-73, 62}, {-78, 62}, {-85, 66}, {-92, 66},
+    {-95, 69}, {-105, 68}, {-115, 69}, {-125, 70}, {-137, 70}, {-150, 71},
+    {-162, 71},
+};
+static const short POLY_GREENLAND[][2] = {
+    {-58, 64}, {-52, 60}, {-44, 60}, {-40, 64}, {-32, 68}, {-25, 70},
+    {-20, 73}, {-22, 76}, {-30, 78}, {-45, 80}, {-58, 78}, {-62, 74},
+    {-60, 70},
+};
+static const short POLY_SOUTH_AMERICA[][2] = {
+    {-79, 9}, {-75, 11}, {-71, 12}, {-64, 10}, {-60, 8}, {-53, 5},
+    {-50, 0}, {-44, -3}, {-37, -6}, {-35, -9}, {-39, -13}, {-40, -20},
+    {-41, -23}, {-48, -27}, {-52, -32}, {-57, -38}, {-62, -41}, {-65, -45},
+    {-68, -50}, {-70, -54}, {-73, -50}, {-73, -44}, {-73, -37}, {-72, -30},
+    {-71, -22}, {-70, -18}, {-75, -15}, {-79, -8}, {-81, -4}, {-80, 0},
+    {-80, 4},
+};
+static const short POLY_EUROPE[][2] = {
+    {-10, 36}, {-9, 43}, {-2, 48}, {0, 50}, {3, 53}, {8, 57}, {10, 59},
+    {18, 56}, {21, 55}, {24, 59}, {28, 60}, {30, 62}, {30, 66}, {27, 70},
+    {22, 70}, {18, 69}, {13, 66}, {11, 62}, {6, 58}, {5, 55}, {8, 54},
+    {10, 54}, {12, 51}, {10, 48}, {8, 45}, {7, 44}, {3, 42}, {0, 40},
+    {-2, 37}, {-6, 36},
+};
+static const short POLY_BRITAIN[][2] = {
+    {-5, 50}, {-3, 53}, {-5, 56}, {-3, 58}, {-1, 57}, {0, 53}, {1, 51},
+    {-3, 50},
+};
+static const short POLY_AFRICA[][2] = {
+    {-6, 35}, {-10, 31}, {-15, 27}, {-17, 21}, {-17, 15}, {-15, 11},
+    {-12, 8}, {-8, 5}, {-4, 5}, {0, 6}, {6, 4}, {9, 4}, {9, -1},
+    {12, -5}, {13, -10}, {12, -17}, {14, -22}, {16, -28}, {18, -34},
+    {20, -35}, {25, -34}, {28, -33}, {32, -29}, {35, -24}, {36, -18},
+    {40, -15}, {40, -10}, {41, -4}, {42, 0}, {46, 2}, {51, 11}, {48, 11},
+    {44, 13}, {41, 16}, {39, 21}, {37, 25}, {35, 28}, {33, 31}, {30, 31},
+    {25, 32}, {20, 32}, {15, 33}, {11, 34}, {10, 37}, {5, 37}, {0, 36},
+};
+static const short POLY_ASIA[][2] = {
+    {28, 36}, {30, 36}, {33, 36}, {36, 36}, {39, 38}, {42, 40}, {44, 41},
+    {48, 42}, {50, 44}, {52, 46}, {55, 47}, {58, 49}, {60, 51}, {63, 53},
+    {66, 55}, {68, 58}, {70, 60}, {72, 63}, {74, 66}, {76, 69}, {78, 71},
+    {82, 73}, {86, 74}, {90, 75}, {95, 76}, {100, 77}, {105, 77},
+    {110, 76}, {115, 74}, {120, 73}, {126, 72}, {132, 72}, {138, 72},
+    {144, 71}, {150, 70}, {156, 69}, {162, 68}, {168, 67}, {174, 66},
+    {178, 65}, {178, 64}, {170, 60}, {164, 60}, {160, 58}, {158, 53},
+    {156, 51}, {150, 59}, {146, 59}, {142, 55}, {141, 50}, {140, 45},
+    {138, 42}, {135, 40}, {132, 38}, {129, 35}, {127, 34}, {124, 32},
+    {122, 30}, {120, 27}, {117, 23}, {113, 22}, {110, 20}, {108, 18},
+    {106, 10}, {104, 8}, {101, 7}, {99, 10}, {98, 14}, {96, 16}, {94, 18},
+    {92, 21}, {90, 22}, {88, 22}, {86, 20}, {84, 19}, {82, 16}, {80, 13},
+    {78, 8}, {76, 9}, {74, 14}, {72, 20}, {70, 23}, {67, 25}, {64, 25},
+    {61, 25}, {58, 26}, {59, 23}, {57, 19}, {53, 16}, {48, 14}, {44, 13},
+    {43, 16}, {41, 20}, {39, 24}, {38, 28}, {39, 31}, {36, 36}, {33, 36},
+    {30, 36},
+};
+static const short POLY_JAPAN[][2] = {
+    {130, 31}, {131, 33}, {133, 34}, {136, 35}, {138, 35}, {140, 36},
+    {141, 38}, {141, 41}, {142, 44}, {144, 44}, {143, 42}, {141, 39},
+    {139, 37}, {137, 35}, {134, 34}, {131, 32},
+};
+static const short POLY_SUMATRA[][2] = {
+    {95, 5}, {100, 0}, {104, -3}, {106, -6}, {103, -5}, {99, 0},
+};
+static const short POLY_BORNEO[][2] = {
+    {109, 1}, {113, 4}, {117, 6}, {119, 1}, {117, -3}, {113, -4}, {110, -2},
+};
+static const short POLY_NEW_GUINEA[][2] = {
+    {131, -1}, {136, -2}, {141, -3}, {146, -6}, {150, -8}, {147, -9},
+    {143, -8}, {138, -7}, {134, -4},
+};
+static const short POLY_AUSTRALIA[][2] = {
+    {114, -22}, {114, -30}, {115, -34}, {118, -35}, {122, -34}, {126, -32},
+    {129, -32}, {132, -32}, {135, -35}, {138, -35}, {140, -38}, {144, -38},
+    {147, -39}, {150, -37}, {153, -32}, {153, -27}, {151, -24}, {149, -20},
+    {146, -19}, {143, -15}, {142, -11}, {140, -12}, {137, -12}, {135, -15},
+    {132, -12}, {130, -13}, {127, -14}, {124, -16}, {121, -18}, {118, -20},
+    {115, -21},
+};
+static const short POLY_NEW_ZEALAND[][2] = {
+    {167, -45}, {169, -43}, {171, -42}, {173, -41}, {175, -38}, {177, -38},
+    {178, -37}, {176, -39}, {174, -41}, {172, -43}, {169, -46},
+};
+
+static int map_px(double lon)
+{
+    return WC_MAP_X + (int)((lon + 180.0) * WC_MAP_W / 360.0);
+}
+
+static int map_py(double lat)
+{
+    return WC_MAP_Y + (int)((WC_MAP_LAT_TOP - lat) * WC_MAP_H / WC_MAP_LAT_SPAN);
+}
+
+static void fill_poly(uint32_t *pixels, unsigned stride, const short (*pts)[2], int n, uint32_t color)
+{
+    for (int py = 0; py < WC_MAP_H; ++py) {
+        double lat = WC_MAP_LAT_TOP - (py + 0.5) * WC_MAP_LAT_SPAN / WC_MAP_H;
+        double xs[32];
+        int m = 0;
+        for (int i = 0; i < n; ++i) {
+            int j = (i + 1) % n;
+            double lat1 = pts[i][1], lat2 = pts[j][1];
+            if ((lat1 <= lat && lat < lat2) || (lat2 <= lat && lat < lat1)) {
+                double lon = pts[i][0] + (lat - lat1) * (pts[j][0] - pts[i][0]) / (lat2 - lat1);
+                if (m < 32)
+                    xs[m++] = lon;
+            }
+        }
+        for (int i = 1; i < m; ++i) {
+            double v = xs[i];
+            int k = i - 1;
+            while (k >= 0 && xs[k] > v) {
+                xs[k + 1] = xs[k];
+                --k;
+            }
+            xs[k + 1] = v;
+        }
+        for (int k = 0; k + 1 < m; k += 2) {
+            int xa = map_px(xs[k]), xb = map_px(xs[k + 1]);
+            if (xa < WC_MAP_X)
+                xa = WC_MAP_X;
+            if (xb > WC_MAP_X + WC_MAP_W)
+                xb = WC_MAP_X + WC_MAP_W;
+            if (xb > xa)
+                fill(pixels, stride, xa, WC_MAP_Y + py, xb - xa, 1, color);
+        }
+    }
+}
+
+static void disc(uint32_t *pixels, unsigned stride, int cx, int cy, int r, uint32_t color)
+{
+    /* Integer disc: widen each row until the next pixel would leave it. */
+    for (int dy = -r; dy <= r; ++dy) {
+        int dx = 0;
+        while ((dx + 1) * (dx + 1) + dy * dy <= r * r)
+            ++dx;
+        fill(pixels, stride, cx - dx, cy + dy, 2 * dx + 1, 1, color);
+    }
+}
+
+static void draw_world_clock_map(struct app *app, uint32_t *pixels, unsigned stride,
+                                 int64_t utc, const struct tm *today)
+{
+    (void)today;
+    const struct wc_city *city = &WC_CITIES[WC_MAP_ORDER[app->wc_map]];
+    uint32_t grid = blend(BG, MUTED, 64);
+    /* The pin city's GMT band: one hour is 15 degrees of longitude. */
+    int band = (int)((city->lon + 180.0) / 15.0);
+    if (band < 0)
+        band = 0;
+    if (band > 23)
+        band = 23;
+    fill(pixels, stride, WC_MAP_X + band * WC_MAP_W / 24, WC_MAP_Y,
+         WC_MAP_W / 24 + 1, WC_MAP_INFO_Y - WC_MAP_Y, PANEL);
+    /* GMT grid: a line every hour of longitude, one every 30 degrees
+     * of latitude. */
+    for (int k = 0; k <= 24; ++k)
+        fill(pixels, stride, WC_MAP_X + k * WC_MAP_W / 24, WC_MAP_Y, 1, WC_MAP_H, grid);
+    static const int lats[] = {60, 30, 0, -30};
+    for (unsigned i = 0; i < sizeof lats / sizeof lats[0]; ++i)
+        fill(pixels, stride, WC_MAP_X, map_py(lats[i]), WC_MAP_W, 1, grid);
+    /* Land, then the cities: a muted dot each, the pin in accent. */
+    static const struct { const short (*pts)[2]; int n; } polys[] = {
+        {POLY_NORTH_AMERICA, (int)(sizeof POLY_NORTH_AMERICA / sizeof POLY_NORTH_AMERICA[0])},
+        {POLY_GREENLAND, (int)(sizeof POLY_GREENLAND / sizeof POLY_GREENLAND[0])},
+        {POLY_SOUTH_AMERICA, (int)(sizeof POLY_SOUTH_AMERICA / sizeof POLY_SOUTH_AMERICA[0])},
+        {POLY_EUROPE, (int)(sizeof POLY_EUROPE / sizeof POLY_EUROPE[0])},
+        {POLY_BRITAIN, (int)(sizeof POLY_BRITAIN / sizeof POLY_BRITAIN[0])},
+        {POLY_AFRICA, (int)(sizeof POLY_AFRICA / sizeof POLY_AFRICA[0])},
+        {POLY_ASIA, (int)(sizeof POLY_ASIA / sizeof POLY_ASIA[0])},
+        {POLY_JAPAN, (int)(sizeof POLY_JAPAN / sizeof POLY_JAPAN[0])},
+        {POLY_SUMATRA, (int)(sizeof POLY_SUMATRA / sizeof POLY_SUMATRA[0])},
+        {POLY_BORNEO, (int)(sizeof POLY_BORNEO / sizeof POLY_BORNEO[0])},
+        {POLY_NEW_GUINEA, (int)(sizeof POLY_NEW_GUINEA / sizeof POLY_NEW_GUINEA[0])},
+        {POLY_AUSTRALIA, (int)(sizeof POLY_AUSTRALIA / sizeof POLY_AUSTRALIA[0])},
+        {POLY_NEW_ZEALAND, (int)(sizeof POLY_NEW_ZEALAND / sizeof POLY_NEW_ZEALAND[0])},
+    };
+    for (unsigned i = 0; i < sizeof polys / sizeof polys[0]; ++i)
+        fill_poly(pixels, stride, polys[i].pts, polys[i].n, INK);
+    outline(pixels, stride, WC_MAP_X - 1, WC_MAP_Y - 1, WC_MAP_W + 2, WC_MAP_H + 2, grid);
+    for (int i = 0; i < WC_CITY_COUNT; ++i)
+        fill(pixels, stride, map_px(WC_CITIES[i].lon) - 1, map_py(WC_CITIES[i].lat) - 1,
+             3, 3, MUTED);
+    disc(pixels, stride, map_px(city->lon), map_py(city->lat), 6, BG);
+    disc(pixels, stride, map_px(city->lon), map_py(city->lat), 5, ACCENT);
+    disc(pixels, stride, map_px(city->lon), map_py(city->lat), 2, BG);
+    /* GMT strip: a tick every hour, labelled every four hours. */
+    for (int k = 0; k <= 24; ++k)
+        fill(pixels, stride, WC_MAP_X + k * WC_MAP_W / 24, WC_MAP_STRIP_Y, 1, 6, MUTED);
+    static const int strip_lon[] = {-180, -120, -60, 0, 60, 120, 180};
+    static const char *const strip_label[] = {"-12", "-8", "-4", "0", "+4", "+8", "+12"};
+    for (unsigned i = 0; i < sizeof strip_lon / sizeof strip_lon[0]; ++i) {
+        int cx = map_px(strip_lon[i]);
+        int w = text_width(strip_label[i]);
+        int x = i == 0 ? WC_MAP_X : i + 1 == sizeof strip_lon / sizeof strip_lon[0]
+                             ? WC_MAP_X + WC_MAP_W - w
+                             : cx - w / 2;
+        draw_text(pixels, stride, x, WC_MAP_STRIP_Y + 6, strip_label[i], MUTED);
+    }
+    /* Info panel, Ubuntu tooltip style: city and country, abbreviation
+     * and offset with the local time, date and difference from home. */
+    int year, month, mday, hour, min, sec, wday;
+    wc_local_time(city, utc, &year, &month, &mday, &hour, &min, &sec, &wday);
+    static const char *const wd[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *const mo[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    char offset[16], line[80];
+    format_offset(offset, sizeof offset, wc_offset_minutes(city, utc));
+    snprintf(line, sizeof line, "%s, %s", city->name, city->country);
+    draw_text_fitted(pixels, stride, 18, WC_MAP_INFO_Y, WIDTH - 36, line, INK);
+    const char *abbr = wc_is_dst(city, utc) && city->abbr_dst ? city->abbr_dst : city->abbr_std;
+    snprintf(line, sizeof line, "%s (%s)   %02d:%02d", abbr, offset, hour, min);
+    draw_text_fitted(pixels, stride, 18, WC_MAP_INFO_Y + 22, WIDTH - 36, line, ACCENT);
+    int diff = wc_offset_minutes(city, utc) - wc_offset_minutes(&WC_CITIES[0], utc);
+    char difftext[48];
+    if (!diff)
+        snprintf(difftext, sizeof difftext, "Same time as Los Angeles");
+    else {
+        int ad = diff < 0 ? -diff : diff;
+        if (ad % 60)
+            snprintf(difftext, sizeof difftext, "%dh %02dm %s Los Angeles", ad / 60, ad % 60,
+                     diff > 0 ? "ahead of" : "behind");
+        else
+            snprintf(difftext, sizeof difftext, "%dh %s Los Angeles", ad / 60,
+                     diff > 0 ? "ahead of" : "behind");
+    }
+    snprintf(line, sizeof line, "%s %d %s, %s", wd[wday], mday, mo[month - 1], difftext);
+    draw_text_fitted(pixels, stride, 18, WC_MAP_INFO_Y + 44, WIDTH - 36, line, MUTED);
+    centered(pixels, stride, 0, WC_MAP_HINT_Y, WIDTH, "Wheel moves pin, Centre opens", MUTED);
+}
+
 static void draw_world_clock_detail(struct app *app, uint32_t *pixels, unsigned stride,
                                     int64_t utc)
 {
@@ -910,8 +1268,28 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         draw_text(pixels, stride, 345 - text_width(app->number), 43, app->number, INK);
         break;
     case WORLD_CLOCK:
-        for (int i = 0; i < layout.count; ++i)
-            draw_world_clock_row(app, pixels, stride, &layout.items[i], utc, today);
+        for (int i = 0; i < layout.count; ++i) {
+            if (layout.items[i].code == WC_CITY_COUNT) {
+                /* The World map footer button below the rows. */
+                bool selected = app->focus == WC_CITY_COUNT;
+                paint_list_row(pixels, stride, &layout.items[i], selected);
+                char label[] = "World map";
+                if (SCHEME.caps_rows)
+                    upper(label);
+                int y = layout.items[i].y + (layout.items[i].h - F20_H) / 2;
+                draw_text_fitted(pixels, stride, SCHEME.text_x, y,
+                                 WIDTH - SCHEME.text_x - 40, label,
+                                 selected ? sel_text_color() : INK);
+                if (selected)
+                    draw_text(pixels, stride, 322, y, ">",
+                              SCHEME.painter == Q2POD_SEL_CARD ? SCHEME.chevron
+                                                               : sel_text_color());
+            } else
+                draw_world_clock_row(app, pixels, stride, &layout.items[i], utc, today);
+        }
+        break;
+    case WC_MAP:
+        draw_world_clock_map(app, pixels, stride, utc, today);
         break;
     case WC_DETAIL:
         draw_world_clock_detail(app, pixels, stride, utc);
@@ -921,8 +1299,8 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
     }
 
     /* World Clock rows are drawn above; the generic list loop below
-     * would draw them a second time. */
-    if (app->screen == WORLD_CLOCK)
+     * would draw them a second time. The map has no list rows. */
+    if (app->screen == WORLD_CLOCK || app->screen == WC_MAP)
         return;
 
     for (int i = 0; i < layout.count; ++i) {

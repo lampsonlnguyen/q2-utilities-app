@@ -79,6 +79,17 @@ static void worldclock(void)
     assert(app.screen == WC_DETAIL && app.wc_selected == 0);
     back(); /* -> WORLD_CLOCK */
     assert(app.screen == WORLD_CLOCK);
+    /* World map footer button: y=286..319. Opens on Los Angeles. */
+    tap(187, 303, 0);
+    assert(app.screen == WC_MAP && app.wc_map == 1);
+    send("w -9", 0); /* one city east in longitude order: LAX -> DEN */
+    assert(app.wc_map == 2);
+    tap(328, 88, 0); /* Tokyo on the map: lon 139.7, lat 35.7 */
+    assert(app.wc_map == 13);
+    send("k u 218", 0); /* Centre -> Tokyo detail */
+    assert(app.screen == WC_DETAIL && app.wc_selected == 13);
+    back(); /* -> WORLD_CLOCK, focused on Tokyo */
+    assert(app.screen == WORLD_CLOCK && app.focus == 13);
     back(); /* -> HOME */
     assert(app.screen == HOME);
 }

@@ -8,7 +8,7 @@
 
 enum { WIDTH = 375, HEIGHT = 320, TASK_LIMIT = 32, TASK_LENGTH = 24, LAP_LIMIT = 4 };
 
-enum screen { HOME, STOPWATCH, CALENDAR, TODO, CALCULATOR, WORLD_CLOCK, WC_DETAIL, EDIT_TASK, TASK_ACTIONS };
+enum screen { HOME, STOPWATCH, CALENDAR, TODO, CALCULATOR, WORLD_CLOCK, WC_DETAIL, EDIT_TASK, TASK_ACTIONS, WC_MAP };
 
 struct task {
     bool done;
@@ -30,6 +30,7 @@ struct app {
     char draft[TASK_LENGTH + 1];
     const char *task_path;
     int wc_top, wc_selected;
+    int wc_map; /* Map picker: position in WC_MAP_ORDER (west to east) */
     double total;
     char op;
     bool entering, error;
