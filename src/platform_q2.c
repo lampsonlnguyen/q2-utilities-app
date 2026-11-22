@@ -128,7 +128,7 @@ int main(void)
         int64_t now = monotonic_ms();
         if (can_pan) {
             unsigned back = visible ? 0 : WIDTH;
-            app_draw(&app, memory + back * stride, stride, now, &today);
+            app_draw(&app, memory + back * stride, stride, now, date, &today);
             var.yoffset = back;
             if (ioctl(fb, FBIOPAN_DISPLAY, &var) == 0)
                 visible = back;
@@ -136,7 +136,7 @@ int main(void)
                 can_pan = false;
         }
         if (!can_pan)
-            app_draw(&app, memory + visible * stride, stride, now, &today);
+            app_draw(&app, memory + visible * stride, stride, now, date, &today);
         int timeout = app.screen == STOPWATCH && app.running ? 100 :
                       1000;
         struct pollfd poll_input = {.fd = sock, .events = POLLIN};

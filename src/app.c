@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 #include "app.h"
 #include "q2pod_scheme.h"
+#include "worldclock.h"
 
 #include <errno.h>
 #include <math.h>
@@ -83,7 +84,8 @@ void app_theme(const char *config, int hour)
     }
 }
 
-enum { RETURN_KEY = 170, CENTRE_KEY = 218, WHEEL_STEP = 9, TASKS_PER_PAGE = 5 };
+enum { RETURN_KEY = 170, CENTRE_KEY = 218, WHEEL_STEP = 9, TASKS_PER_PAGE = 5,
+       WC_ROW_H = 52, WC_ROWS = 5 };
 
 struct button {
     int x, y, w, h, code;
@@ -96,7 +98,8 @@ struct layout {
 };
 
 static const char *const titles[] = {
-    "Utilities", "Stopwatch", "Calendar", "To-do", "Calculator", "New task", "Task options"
+    "Utilities", "Stopwatch", "Calendar", "To-do", "Calculator",
+    "World Clock", "World Clock", "New task", "Task options"
 };
 
 static const char *const months[] = {
@@ -111,6 +114,8 @@ static void screen(struct app *app, enum screen next)
     app->touch_button = -1;
     if (next == HOME)
         app->focus = app->home_focus;
+    if (next == WORLD_CLOCK)
+        app->wc_top = 0;
 }
 
 void app_init(struct app *app, const char *task_path)
@@ -285,10 +290,25 @@ static void make_layout(const struct app *app, struct layout *layout)
 {
     layout->count = 0;
     switch (app->screen) {
-    case HOME:
-        /* q2-pod lists: 32 px full-width rows from below the 26 px bar. */
-        for (int i = STOPWATCH; i <= CALCULATOR; ++i)
-            button(layout, 0, 26 + (i - 1) * 32, WIDTH, 32, i, titles[i]);
+    case HOME: {
+        /* q2-pod lists: 32 px full-width rows from below the 26 px bar.
+         * World Clock sits after Stopwatch as the Clock grouping; the
+         * other tools keep their relative order. */
+        static const enum screen order[] = {STOPWATCH, WORLD_CLOCK, CALENDAR, TODO, CALCULATOR};
+        for (unsigned i = 0; i < sizeof order / sizeof order[0]; ++i)
+            button(layout, 0, 26 + (int)i * 32, WIDTH, 32, order[i], titles[order[i]]);
+        break;
+    }
+    case WORLD_CLOCK: {
+        /* 52 px detail rows (GNOME Clocks-style two-line rows): five
+         * visible at a time, the list scrolls under the focus. */
+        for (int i = 0; i < WC_ROWS && app->wc_top + i < WC_CITY_COUNT; ++i)
+            button(layout, 0, 26 + i * WC_ROW_H, WIDTH, WC_ROW_H,
+                   app->wc_top + i, "");
+        break;
+    }
+    case WC_DETAIL:
+        /* Detail view has no buttons; Return goes back to the list. */
         break;
     case STOPWATCH:
         button(layout, 18, 127, 108, 39, 0, app->running ? "Pause" : "Start");
@@ -428,6 +448,13 @@ static void activate(struct app *app, int code, int64_t now, const struct tm *to
         else
             set_today(app, today);
         break;
+    case WORLD_CLOCK:
+        /* code is the city index: open its detail view. */
+        app->wc_selected = code;
+        screen(app, WC_DETAIL);
+        break;
+    case WC_DETAIL:
+        break;
     case TODO:
         if (code == -1) {
             app->draft[0] = '\0';
@@ -458,8 +485,55 @@ static int hit(const struct layout *layout, int x, int y)
     return -1;
 }
 
+/* World Clock input: focus is the city index (0..15), not the visible
+ * row, and the 5-row window scrolls under it. */
+static void world_clock_input(struct app *app, const char *message, int64_t now)
+{
+    struct layout layout;
+    make_layout(app, &layout);
+    char phase;
+    int a, b;
+    if (sscanf(message, "w %d", &a) == 1) {
+        if (a < -200 || a > 200)
+            return;
+        app->wheel += a;
+        int step = app->wheel / WHEEL_STEP;
+        app->wheel %= WHEEL_STEP;
+        app->focus -= step;
+        if (app->focus < 0)
+            app->focus = 0;
+        if (app->focus >= WC_CITY_COUNT)
+            app->focus = WC_CITY_COUNT - 1;
+        if (app->focus < app->wc_top)
+            app->wc_top = app->focus;
+        if (app->focus >= app->wc_top + WC_ROWS)
+            app->wc_top = app->focus - WC_ROWS + 1;
+    } else if (sscanf(message, "t %c %d %d", &phase, &a, &b) == 3) {
+        int index = hit(&layout, a, b);
+        if (phase == 'd')
+            app->touch_button = index;
+        if (phase == 'u') {
+            bool pressed = index >= 0 && index == app->touch_button;
+            app->touch_button = -1;
+            if (pressed) {
+                app->focus = layout.items[index].code;
+                activate(app, app->focus, now, NULL);
+            }
+        }
+    } else if (sscanf(message, "k %c %d", &phase, &a) == 2 && phase == 'u') {
+        if (a == CENTRE_KEY)
+            activate(app, app->focus, now, NULL);
+        else if (a == RETURN_KEY)
+            screen(app, HOME);
+    }
+}
+
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today)
 {
+    if (app->screen == WORLD_CLOCK) {
+        world_clock_input(app, message, now);
+        return;
+    }
     struct layout layout;
     make_layout(app, &layout);
     char phase;
@@ -489,6 +563,8 @@ void app_input(struct app *app, const char *message, int64_t now, const struct t
         if (a == RETURN_KEY) {
             if (app->screen == HOME)
                 app->quit = true;
+            else if (app->screen == WC_DETAIL)
+                screen(app, WORLD_CLOCK);
             else if (app->screen == EDIT_TASK || app->screen == TASK_ACTIONS)
                 screen(app, TODO);
             else
@@ -690,7 +766,92 @@ static void draw_calendar(const struct app *app, uint32_t *pixels, unsigned stri
     }
 }
 
-void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, const struct tm *today)
+/* --- World Clock drawing (GNOME Clocks two-line rows, Casio codes) --- */
+
+static void format_offset(char *text, size_t size, int minutes)
+{
+    int sign = minutes < 0 ? '-' : '+';
+    int abs_min = minutes < 0 ? -minutes : minutes;
+    if (abs_min % 60)
+        snprintf(text, size, "UTC%c%d:%02d", sign, abs_min / 60, abs_min % 60);
+    else
+        snprintf(text, size, "UTC%c%d", sign, abs_min / 60);
+}
+
+static void draw_world_clock_row(struct app *app, uint32_t *pixels, unsigned stride,
+                                 const struct button *item, int64_t utc,
+                                 const struct tm *today)
+{
+    const struct wc_city *city = &WC_CITIES[item->code];
+    bool selected = item->code == app->focus;
+    paint_list_row(pixels, stride, item, selected);
+    int year, month, mday, hour, min, sec, wday;
+    wc_local_time(city, utc, &year, &month, &mday, &hour, &min, &sec, &wday);
+    static const char *const wd[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *const mo[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    char left[48], time[8], sub[64], offset[16];
+    snprintf(left, sizeof left, "%s  %s", city->code, city->name);
+    snprintf(time, sizeof time, "%02d:%02d", hour, min);
+    format_offset(offset, sizeof offset, wc_offset_minutes(city, utc));
+    int64_t city_day = wc_days_from_civil(year, (unsigned)month, (unsigned)mday);
+    int64_t home_day = wc_days_from_civil(today->tm_year + 1900, (unsigned)today->tm_mon + 1,
+                                          (unsigned)today->tm_mday);
+    const char *roll = city_day > home_day ? " +1d" : city_day < home_day ? " -1d" : "";
+    snprintf(sub, sizeof sub, "%s %d %s | %s%s | %s%s", wd[wday], mday, mo[month - 1],
+             offset, wc_is_dst(city, utc) ? " DST" : "", hour >= 6 && hour < 18 ? "Day" : "Night",
+             roll);
+    int y1 = item->y + 5, y2 = item->y + 27;
+    char label[48];
+    snprintf(label, sizeof label, "%s", left);
+    if (SCHEME.caps_rows)
+        upper(label);
+    draw_text_fitted(pixels, stride, SCHEME.text_x, y1, 210, label,
+                     selected ? sel_text_color() : INK);
+    /* Time ends at x=312 so the chevron at x=322 never overlaps it. */
+    draw_text(pixels, stride, 312 - text_width(time), y1, time,
+              selected ? sel_text_color() : ACCENT);
+    draw_text_fitted(pixels, stride, SCHEME.text_x, y2, WIDTH - SCHEME.text_x - 20, sub,
+                     selected ? sel_text_color() : MUTED);
+    if (selected)
+        draw_text(pixels, stride, 322, item->y + (WC_ROW_H - F20_H) / 2, ">",
+                  SCHEME.painter == Q2POD_SEL_CARD ? SCHEME.chevron : sel_text_color());
+}
+
+static void draw_world_clock_detail(struct app *app, uint32_t *pixels, unsigned stride,
+                                    int64_t utc)
+{
+    const struct wc_city *city = &WC_CITIES[app->wc_selected];
+    int year, month, mday, hour, min, sec, wday;
+    wc_local_time(city, utc, &year, &month, &mday, &hour, &min, &sec, &wday);
+    static const char *const wd[] = {"Sunday", "Monday", "Tuesday", "Wednesday",
+                                     "Thursday", "Friday", "Saturday"};
+    char value[64], offset[16];
+    snprintf(value, sizeof value, "%02d:%02d:%02d", hour, min, sec);
+    centered(pixels, stride, 18, 70, 339, value, ACCENT);
+    snprintf(value, sizeof value, "%s, %d %s %d", wd[wday], mday, months[month - 1], year);
+    centered(pixels, stride, 18, 112, 339, value, INK);
+    format_offset(offset, sizeof offset, wc_offset_minutes(city, utc));
+    snprintf(value, sizeof value, "%s | %s | %s", offset,
+             wc_is_dst(city, utc) ? "Daylight saving" : "Standard time",
+             hour >= 6 && hour < 18 ? "Day" : "Night");
+    centered(pixels, stride, 18, 142, 339, value, MUTED);
+    int diff = wc_offset_minutes(city, utc) - wc_offset_minutes(&WC_CITIES[0], utc);
+    if (!diff)
+        snprintf(value, sizeof value, "Same time as %s", WC_CITIES[0].name);
+    else {
+        int abs_diff = diff < 0 ? -diff : diff;
+        if (abs_diff % 60)
+            snprintf(value, sizeof value, "%dh %02dm %s %s", abs_diff / 60, abs_diff % 60,
+                     diff > 0 ? "ahead of" : "behind", WC_CITIES[0].name);
+        else
+            snprintf(value, sizeof value, "%dh %s %s", abs_diff / 60,
+                     diff > 0 ? "ahead of" : "behind", WC_CITIES[0].name);
+    }
+    centered(pixels, stride, 18, 172, 339, value, MUTED);
+}
+
+void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, time_t utc, const struct tm *today)
 {
     struct layout layout;
     make_layout(app, &layout);
@@ -704,6 +865,8 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
     char title[32];
     if (app->screen == CALENDAR)
         snprintf(title, sizeof title, "%s %d", months[app->month], app->year);
+    else if (app->screen == WC_DETAIL)
+        snprintf(title, sizeof title, "%s", WC_CITIES[app->wc_selected].name);
     else
         snprintf(title, sizeof title, "%s", titles[app->screen]);
     if (SCHEME.caps_bar)
@@ -746,9 +909,21 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, c
         }
         draw_text(pixels, stride, 345 - text_width(app->number), 43, app->number, INK);
         break;
+    case WORLD_CLOCK:
+        for (int i = 0; i < layout.count; ++i)
+            draw_world_clock_row(app, pixels, stride, &layout.items[i], utc, today);
+        break;
+    case WC_DETAIL:
+        draw_world_clock_detail(app, pixels, stride, utc);
+        break;
     case HOME:
         break;
     }
+
+    /* World Clock rows are drawn above; the generic list loop below
+     * would draw them a second time. */
+    if (app->screen == WORLD_CLOCK)
+        return;
 
     for (int i = 0; i < layout.count; ++i) {
         const struct button *item = &layout.items[i];

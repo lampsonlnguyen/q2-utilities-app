@@ -5,9 +5,33 @@ A full-screen utility card app for the Shanling Q2 running [Q2 Pod](https://gith
 | Tool | Features |
 | --- | --- |
 | Stopwatch | Start, pause, resume, and reset. Records cumulative lap times and shows the latest four. Timing continues when you return to the Utilities menu while the app is open. |
+| World Clock | Local time in 16 preset cities, each with its Casio-style 3-letter code, date, UTC offset, daylight-saving state, and day/night. Select a city for a detail view with its full date, offset, and difference from Los Angeles. |
 | Calendar | Browse months, highlight the player's current date, and jump back with **Today**. The date comes from the Q2 clock. |
 | To-do | Add, complete, reopen, and delete up to 32 tasks. Use the on-screen keyboard for names up to 24 characters. Tasks are saved in `.utilities-app/tasks.tsv` on the SD card. |
 | Calculator | Add, subtract, multiply, and divide with decimal input. Operations are evaluated in entry order. **C** clears the calculator and **<** erases the last digit. |
+
+## World Clock
+
+World Clock lists 16 cities, in the style of Ubuntu's GNOME Clocks list
+(city, local time, date, UTC offset) with the Casio AE1200's 3-letter city
+codes (LAX, NYC, TYO, …) and its 31-time-zone / 48-city idea cut down to a
+scrollable preset: Los Angeles, New York, Chicago, Denver, Honolulu, London,
+Paris, Berlin, Moscow, Dubai, Mumbai, Ho Chi Minh City, Singapore, Tokyo,
+Sydney, Auckland. Times are 24-hour. Day means 06:00–18:00 local, Night
+otherwise, and a `+1d` / `-1d` mark shows when a city's date differs from
+the Q2's local date.
+
+Time zones are resolved from an embedded table in `src/worldclock.c`, not
+from the device: the Q2's stock firmware ships no timezone database
+(`/usr/share/zoneinfo` is absent from the V1.36 sysroot), so each city
+carries its IANA base offset plus its daylight-saving rule (US 2nd Sunday
+in March / 1st Sunday in November, EU last Sunday in March / October,
+Sydney and Auckland October–April). The rules were checked against IANA
+tzdata for 2026, including the spring-forward and fall-back instants and
+the southern hemisphere's reversed seasons; `tests/test_worldclock.c`
+pins those transitions. If a government changes a rule, the table needs
+updating — the app cannot learn it from the device. Adding or removing
+cities is a one-line change to the `WC_CITIES` table in the same file.
 
 Turn the clickwheel to move the highlight and press Centre to select. You can also tap a button. Press Return to go back, or press it from the Utilities menu to exit. Q2 Pod also handles holding Return to close the app. Stopwatch and calculator state reset when the app closes. Q2 Pod may close an idle card app after two minutes unless Smart Awake is enabled.
 
@@ -34,7 +58,7 @@ For an existing installation, install the new ZIP, copy `.utilities/tasks.tsv` t
 
 The store derives the app ID `utilities-app` from this repository name. The ZIP must contain `.utilities-app/q2app` and `.utilities-app/q2-utilities-app`; the executable listens on `/tmp/q2-utilities-app.input.sock`.
 
-`make check` runs the host checks with a C compiler. It exercises the on-screen touch targets, wheel and Centre navigation, lap and pause timing, a leap-day calendar, to-do persistence, and calculator error recovery.
+`make check` runs the host checks with a C compiler. It exercises the on-screen touch targets, wheel and Centre navigation, lap and pause timing, a leap-day calendar, to-do persistence, calculator error recovery, and World Clock navigation plus its DST transitions (US/EU spring-forward and fall-back, Sydney/Auckland reversed seasons, leap-day rollover, half-hour Mumbai).
 
 ## Credits
 
@@ -42,7 +66,7 @@ The store derives the app ID `utilities-app` from this repository name. The ZIP 
 
 ## Appearance
 
-Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including each theme’s accent and Light Mode. It reads `/mnt/data/config.ini` when opened; reopen Utilities after changing your theme. Auto Light Mode uses the device’s local clock (light from 07:00 to 19:00) and updates while the app is open. The interface is drawn as q2-pod lists: a 26-pixel status bar with the screen title (and `< Back` on sub-pages), 32-pixel rows from below the bar, the theme's own selection painter (Minimal card, Classic gloss band, Modern accent bar), and a chevron on the selected row. The Stopwatch, Calendar, To-do, and Calculator pages use the same bar and row painting; the calendar's month and year move into the title bar and today is marked with the selection. No theme artwork or image files are loaded. Missing settings default to Minimal, Graphite, and dark mode.
+Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including each theme’s accent and Light Mode. It reads `/mnt/data/config.ini` when opened; reopen Utilities after changing your theme. Auto Light Mode uses the device’s local clock (light from 07:00 to 19:00) and updates while the app is open. The interface is drawn as q2-pod lists: a 26-pixel status bar with the screen title (and `< Back` on sub-pages), 32-pixel rows from below the bar, the theme's own selection painter (Minimal card, Classic gloss band, Modern accent bar), and a chevron on the selected row. The Stopwatch, Calendar, To-do, and Calculator pages use the same bar and row painting; the calendar's month and year move into the title bar and today is marked with the selection. World Clock uses 52-pixel two-line rows instead of 32-pixel rows so each city fits its time, date, offset, and day/night, with the same bar, selection painter, and chevron. No theme artwork or image files are loaded. Missing settings default to Minimal, Graphite, and dark mode.
 
 The bottom of the screen is kept clear, without footer text.
 
