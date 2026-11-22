@@ -38,15 +38,13 @@ The store derives the app ID `utilities-app` from this repository name. The ZIP 
 
 ## Credits
 
-[Buddy](https://github.com/DiamondBond/q2-fidget) and [Groovebox](https://github.com/DiamondBond/q2-groovebox) by Diamond Bond are the reference implementations for the Q2 Pod manifest, framebuffer, and input socket. The Q2 startup code is adapted from the Rockbox startup file distributed by Groovebox (GPL-2.0-or-later). The Liberation Sans Bold bitmap in `src/font.h` comes from Groovebox and is covered by the [SIL Open Font License](LICENSES/OFL-1.1.txt).
+[Buddy](https://github.com/DiamondBond/q2-fidget) and [Groovebox](https://github.com/DiamondBond/q2-groovebox) by Diamond Bond are the reference implementations for the Q2 Pod manifest, framebuffer, and input socket. The Q2 startup code is adapted from the Rockbox startup file distributed by Groovebox (GPL-2.0-or-later). The Liberation Sans Bold bitmap in `src/font.h` comes from Groovebox and is covered by the [SIL Open Font License](LICENSES/OFL-1.1.txt). The q2-pod scheme data in `src/q2pod_scheme.c` — the ACCENTS tones from `patch/offsets.inc`, Classic Blue's gloss band and status bar from `assets/themes/classic-light/theme.xml`, and the gloss derivation from `tools/theme.py` — is ported from DiamondBond's [Q2 Pod](https://github.com/DiamondBond/q2-pod) and was first adapted for q2-weather; see that file's header for the sources.
 
 ## Appearance
 
-Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including each theme’s accent and Light Mode. It reads `/mnt/data/config.ini` when opened; reopen Utilities after changing your theme. Auto Light Mode uses the device’s local clock (light from 07:00 to 19:00) and updates while the app is open. The interface uses lightweight flat fills rather than loading firmware theme artwork. Missing settings default to Minimal, Graphite, and dark mode.
+Utilities follows Q2 Pod’s saved Minimal, Modern, or Classic theme, including each theme’s accent and Light Mode. It reads `/mnt/data/config.ini` when opened; reopen Utilities after changing your theme. Auto Light Mode uses the device’s local clock (light from 07:00 to 19:00) and updates while the app is open. The interface is drawn as q2-pod lists: a 26-pixel status bar with the screen title (and `< Back` on sub-pages), 32-pixel rows from below the bar, the theme's own selection painter (Minimal card, Classic gloss band, Modern accent bar), and a chevron on the selected row. The Stopwatch, Calendar, To-do, and Calculator pages use the same bar and row painting; the calendar's month and year move into the title bar and today is marked with the selection. No theme artwork or image files are loaded. Missing settings default to Minimal, Graphite, and dark mode.
 
 The bottom of the screen is kept clear, without footer text.
-
-Menu rows are compact (38-pixel spacing) to leave room for additional entries. Interface text uses smooth glyphs close to the original size, with centered headings and safe screen margins.
 
 ## Automatic builds and releases
 
