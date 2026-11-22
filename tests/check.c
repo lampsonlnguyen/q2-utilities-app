@@ -63,6 +63,38 @@ static void calendar(void)
     back();
 }
 
+static void wheel(void)
+{
+    send("w -27", 0);
+    assert(app.focus == 0);
+    send("w -1", 10);
+    assert(app.focus == 1);
+    send("w -27", 20);
+    send("w 28", 30);
+    assert(app.focus == 0);
+    send("w 28", 40);
+    assert(app.focus == 0); /* Pins at the first row. */
+
+    app_wheel_config(&app, "[IPOD]\nWHEELSENSITIVITY=10\n[Q2POD]\r\nWHEELSENSITIVITY=160\r\n");
+    send("w -8", 50);
+    assert(app.focus == 0);
+    send("w -1", 60);
+    assert(app.focus == 1);
+    send("w -26", 70); /* 35 units total, exactly four ticks at 160%. */
+    assert(app.focus == 4);
+    send("w -200", 80);
+    assert(app.focus == 4); /* Pins at the last row. */
+
+    app_wheel_config(&app, "[Q2POD]\nWHEELSENSITIVITY=1600\n");
+    send("w 27", 90);
+    send("w 1", 1090); /* Old residual travel expires. */
+    assert(app.focus == 4);
+    send("w 27", 1100);
+    assert(app.focus == 3);
+    send("w 200", 1110);
+    assert(app.focus == 0);
+}
+
 static void worldclock(void)
 {
     tap(50, 74, 0); /* World Clock row: y=58..89 */
@@ -71,9 +103,11 @@ static void worldclock(void)
     app_theme("[IPOD]\nTHEME=1\nCLASSIC_LIGHT_ACCENT=0\nLIGHT=1\n", 12);
     app_draw(&app, pixels, HEIGHT, 0, UTC, &today);
     assert(pixels[20 * HEIGHT + HEIGHT - 1 - 26] == 0xff94c7de);
-    send("w -90", 0); /* 10 steps down the 16-city list */
+    send("w -196", 0);
+    send("w -84", 10); /* 10 steps down the 16-city list. */
     assert(app.focus == 10 && app.wc_top == 6);
-    send("w 90", 0);
+    send("w 196", 20);
+    send("w 84", 30);
     assert(app.focus == 0 && app.wc_top == 0);
     tap(50, 42, 0); /* first city row -> detail (Los Angeles) */
     assert(app.screen == WC_DETAIL && app.wc_selected == 0);
@@ -155,6 +189,7 @@ int main(void)
     snprintf(path, sizeof path, "%s/tasks.tsv", dir);
     app_init(&app, path);
     theme();
+    wheel();
     stopwatch();
     calendar();
     worldclock();

@@ -17,7 +17,8 @@ struct task {
 
 struct app {
     enum screen screen;
-    int focus, home_focus, wheel;
+    int focus, home_focus, wheel, wheel_units;
+    int64_t wheel_at;
     bool quit;
     int touch_button;
     bool running;
@@ -36,6 +37,7 @@ struct app {
     char number[32];
 };
 
+void app_wheel_config(struct app *app, const char *config);
 void app_theme(const char *config, int hour);
 void app_init(struct app *app, const char *task_path);
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today);

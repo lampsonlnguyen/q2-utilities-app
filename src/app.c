@@ -16,19 +16,19 @@ static uint32_t BG=0, PANEL=0x191919, INK=0xeeeeec, MUTED=0x949294,
 /* The resolved q2-pod scheme (src/q2pod_scheme.c): bar gradient, selection
  * painter and surfaces for the parsed theme, accent and light/dark half. */
 static Q2PodScheme SCHEME;
-static int config_number(const char *config, const char *key, int fallback, int limit) {
-    int ipod=0;
+static int config_number(const char *config, const char *section, const char *key,
+                         int fallback, int limit, bool canonical) {
+    bool in_section=false;
     while (*config) {
         const char *end=config;
         while (*end && *end!='\n') ++end;
         const char *p=config;
         while (p<end && (*p==' ' || *p=='\t')) ++p;
         if (p<end && *p=='[') {
-            const char section[]="[IPOD]";
             int i=0;
             while (p+i<end && section[i] && p[i]==section[i]) ++i;
-            ipod=i==6;
-        } else if (ipod) {
+            in_section=!section[i];
+        } else if (in_section) {
             int i=0;
             while (p+i<end && key[i] && p[i]==key[i]) ++i;
             if (!key[i]) {
@@ -36,6 +36,7 @@ static int config_number(const char *config, const char *key, int fallback, int 
                 while (p<end && (*p==' ' || *p=='\t')) ++p;
                 if (p<end && *p++=='=') {
                     while (p<end && (*p==' ' || *p=='\t')) ++p;
+                    if (canonical && p<end && *p=='0') return fallback;
                     unsigned value=0; int digits=0;
                     while (p<end && *p>='0' && *p<='9') {
                         value=value*10+(unsigned)(*p++-'0');
@@ -57,15 +58,15 @@ void app_theme(const char *config, int hour)
         0x2a6ad8,0xc45400,0x903868,0x424242,0x647f34};
     static const uint32_t bright[]={0xd8d8d8,0xff1448,0x30929b,0x9a8446,
         0x447cdd,0xcb681e,0x9d4f7a,0xd8d8d8,0x778e4c};
-    int theme=config_number(config,"THEME",0,3);
+    int theme=config_number(config,"[IPOD]","THEME",0,3,false);
     const char *key=theme==0?"MINIMAL_ACCENT":theme==1?"CLASSIC_LIGHT_ACCENT":"ACCENT";
-    int raw_accent=config_number(config,key,0,9);
+    int raw_accent=config_number(config,"[IPOD]",key,0,9,false);
     int accent=raw_accent;
     if(theme==1)
         accent=accent==0?4:accent==8?8:accent-1;
     else if(theme==2 && accent==7)
         accent=0;
-    int mode=config_number(config,"LIGHT",0,3);
+    int mode=config_number(config,"[IPOD]","LIGHT",0,3,false);
     bool light=mode==1 || (mode==2 && hour>=7 && hour<19);
     /* Classic accent 0 is Classic Blue, its own gloss band (accent 9 in
      * q2pod_scheme); the other Classic values follow the flat mapping
@@ -84,7 +85,8 @@ void app_theme(const char *config, int hour)
     }
 }
 
-enum { RETURN_KEY = 170, CENTRE_KEY = 218, WHEEL_STEP = 9, TASKS_PER_PAGE = 5,
+enum { RETURN_KEY = 170, CENTRE_KEY = 218, WHEEL_FINE = 16,
+       WHEEL_DEFAULT = 28 * WHEEL_FINE, WHEEL_IDLE_MS = 1000, TASKS_PER_PAGE = 5,
        WC_ROW_H = 52, WC_ROWS = 5 };
 
 struct button {
@@ -107,6 +109,16 @@ static const char *const months[] = {
     "July", "August", "September", "October", "November", "December"
 };
 
+void app_wheel_config(struct app *app, const char *config)
+{
+    int percent = config_number(config, "[Q2POD]", "WHEELSENSITIVITY", 50, 201, true);
+    if (percent < 10 || percent % 10)
+        percent = 50;
+    int units = (WHEEL_DEFAULT * 50 + percent / 2) / percent;
+    app->wheel = app->wheel * units / app->wheel_units;
+    app->wheel_units = units;
+}
+
 static void screen(struct app *app, enum screen next)
 {
     app->screen = next;
@@ -120,7 +132,8 @@ static void screen(struct app *app, enum screen next)
 
 void app_init(struct app *app, const char *task_path)
 {
-    *app = (struct app){ .task_path = task_path, .touch_button = -1, .number = "0" };
+    *app = (struct app){ .task_path = task_path, .touch_button = -1, .number = "0",
+                         .wheel_units = WHEEL_DEFAULT };
     FILE *file = fopen(task_path, "r");
     if (!file) {
         app->load_failed = errno != ENOENT;
@@ -485,81 +498,61 @@ static int hit(const struct layout *layout, int x, int y)
     return -1;
 }
 
-/* World Clock input: focus is the city index (0..15), not the visible
- * row, and the 5-row window scrolls under it. */
-static void world_clock_input(struct app *app, const char *message, int64_t now)
+static void move_focus(struct app *app, int travel, int count, int64_t now)
 {
-    struct layout layout;
-    make_layout(app, &layout);
-    char phase;
-    int a, b;
-    if (sscanf(message, "w %d", &a) == 1) {
-        if (a < -200 || a > 200)
-            return;
-        app->wheel += a;
-        int step = app->wheel / WHEEL_STEP;
-        app->wheel %= WHEEL_STEP;
-        app->focus -= step;
-        if (app->focus < 0)
-            app->focus = 0;
-        if (app->focus >= WC_CITY_COUNT)
-            app->focus = WC_CITY_COUNT - 1;
+    if (!travel || !count)
+        return;
+    /* The card-app protocol sends signed travel, without wheel-lift events. */
+    if (now - app->wheel_at >= WHEEL_IDLE_MS ||
+        (app->wheel > 0 && travel < 0) || (app->wheel < 0 && travel > 0))
+        app->wheel = 0;
+    app->wheel_at = now;
+    int64_t travel_fine = (int64_t)travel * WHEEL_FINE + app->wheel;
+    int step = (int)(travel_fine / app->wheel_units);
+    app->wheel = (int)(travel_fine % app->wheel_units);
+
+    int next = app->focus - step;
+    app->focus = next < 0 ? 0 : next >= count ? count - 1 : next;
+    if (app->screen == WORLD_CLOCK) {
         if (app->focus < app->wc_top)
             app->wc_top = app->focus;
         if (app->focus >= app->wc_top + WC_ROWS)
             app->wc_top = app->focus - WC_ROWS + 1;
-    } else if (sscanf(message, "t %c %d %d", &phase, &a, &b) == 3) {
-        int index = hit(&layout, a, b);
-        if (phase == 'd')
-            app->touch_button = index;
-        if (phase == 'u') {
-            bool pressed = index >= 0 && index == app->touch_button;
-            app->touch_button = -1;
-            if (pressed) {
-                app->focus = layout.items[index].code;
-                activate(app, app->focus, now, NULL);
-            }
-        }
-    } else if (sscanf(message, "k %c %d", &phase, &a) == 2 && phase == 'u') {
-        if (a == CENTRE_KEY)
-            activate(app, app->focus, now, NULL);
-        else if (a == RETURN_KEY)
-            screen(app, HOME);
     }
 }
 
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today)
 {
-    if (app->screen == WORLD_CLOCK) {
-        world_clock_input(app, message, now);
-        return;
-    }
     struct layout layout;
     make_layout(app, &layout);
+    bool world_clock = app->screen == WORLD_CLOCK;
     char phase;
     int a, b;
-    if (sscanf(message, "w %d", &a) == 1 && layout.count) {
-        if (a < -200 || a > 200)
-            return;
-        app->wheel += a;
-        int step = app->wheel / WHEEL_STEP;
-        app->wheel %= WHEEL_STEP;
-        app->focus = (app->focus - step % layout.count + layout.count) % layout.count;
+    if (sscanf(message, "w %d", &a) == 1) {
+        move_focus(app, a, world_clock ? WC_CITY_COUNT : layout.count, now);
     } else if (sscanf(message, "t %c %d %d", &phase, &a, &b) == 3) {
         int index = hit(&layout, a, b);
-        if (phase == 'd')
+        if (phase == 'd') {
+            app->wheel = 0;
             app->touch_button = index;
+        }
         if (phase == 'u') {
             bool pressed = index >= 0 && index == app->touch_button;
             app->touch_button = -1;
             if (pressed) {
-                app->focus = index;
-                activate(app, layout.items[index].code, now, today);
+                int code = layout.items[index].code;
+                app->focus = world_clock ? code : index;
+                activate(app, code, now, today);
             }
         }
     } else if (sscanf(message, "k %c %d", &phase, &a) == 2 && phase == 'u') {
-        if (a == CENTRE_KEY && app->focus < layout.count)
-            activate(app, layout.items[app->focus].code, now, today);
+        if (a == CENTRE_KEY) {
+            app->wheel = 0;
+            if (world_clock)
+                activate(app, app->focus, now, today);
+            else if (app->focus < layout.count)
+                activate(app, layout.items[app->focus].code, now, today);
+        }
         if (a == RETURN_KEY) {
             if (app->screen == HOME)
                 app->quit = true;

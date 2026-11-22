@@ -33,7 +33,7 @@ pins those transitions. If a government changes a rule, the table needs
 updating — the app cannot learn it from the device. Adding or removing
 cities is a one-line change to the `WC_CITIES` table in the same file.
 
-Turn the clickwheel to move the highlight and press Centre to select. You can also tap a button. Press Return to go back, or press it from the Utilities menu to exit. Q2 Pod also handles holding Return to close the app. Stopwatch and calculator state reset when the app closes. Q2 Pod may close an idle card app after two minutes unless Smart Awake is enabled.
+Turn the clickwheel to move the highlight and press Centre to select. Utilities uses the **Wheel Sensitivity** from Q2 Pod’s **System settings → Controls** menu. You can also tap a button. Press Return to go back, or press it from the Utilities menu to exit. Q2 Pod also handles holding Return to close the app. Stopwatch and calculator state reset when the app closes. Q2 Pod may close an idle card app after two minutes unless Smart Awake is enabled.
 
 ## Build and install
 
