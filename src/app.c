@@ -317,8 +317,9 @@ static void make_layout(const struct app *app, struct layout *layout)
         /* q2-pod lists: 32 px full-width rows from below the 26 px bar.
          * World Clock sits after Stopwatch as the Clock grouping; the
          * other tools keep their relative order. */
-        static const enum screen order[] = {STOPWATCH, WORLD_CLOCK, CALENDAR, TODO, CALCULATOR,
-                                              TIME_GROUP, TOOL_GROUP};
+        /* Keep unfinished utilities and their code available for future work,
+         * but do not expose their category submenus to users yet. */
+        static const enum screen order[] = {STOPWATCH, WORLD_CLOCK, CALENDAR, TODO, CALCULATOR};
         for (unsigned i = 0; i < sizeof order / sizeof order[0]; ++i)
             button(layout, 0, 26 + (int)i * 32, WIDTH, 32, order[i], titles[order[i]]);
         break;

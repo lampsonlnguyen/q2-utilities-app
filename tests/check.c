@@ -83,14 +83,14 @@ static void wheel(void)
     send("w -26", 70); /* 35 units total, exactly four ticks at 160%. */
     assert(app.focus == 4);
     send("w -200", 80);
-    assert(app.focus == 6); /* Pins at the last row. */
+    assert(app.focus == 4); /* Pins at the last visible row. */
 
     app_wheel_config(&app, "[Q2POD]\nWHEELSENSITIVITY=1600\n");
     send("w 27", 90);
     send("w 1", 1090); /* Old residual travel expires. */
-    assert(app.focus == 6);
+    assert(app.focus == 4);
     send("w 27", 1100);
-    assert(app.focus == 5);
+    assert(app.focus == 3);
     send("w 200", 1110);
     assert(app.focus == 0);
 }
@@ -156,10 +156,14 @@ static void tasks(const char *path)
 
 static void expanded_utilities(void)
 {
-    /* The original five home entries stay in place. Two icon-bearing
-     * categories follow at y=186..217 and y=218..249. */
+    /* Unfinished categories are hidden on HOME but implementation stays
+     * testable by entering their screens directly. */
     tap(50,203,0);
-    assert(app.screen==TIME_GROUP);
+    assert(app.screen==HOME);
+    tap(50,235,0);
+    assert(app.screen==HOME);
+    app.screen=TIME_GROUP;
+    app.focus=0;
     tap(50,42,0);
     assert(app.screen==POMODORO);
     tap(50,212,1000);
@@ -177,8 +181,8 @@ static void expanded_utilities(void)
     back();assert(app.screen==TIME_GROUP);
     back();assert(app.screen==HOME);
 
-    tap(50,235,8000);
-    assert(app.screen==TOOL_GROUP);
+    app.screen=TOOL_GROUP;
+    app.focus=0;
     static const enum screen types[]={CONVERTER,RANDOMIZER,DATE_CALC,ENGINEERING,EVENT_COUNTER};
     for(int i=0;i<5;i++) {
         tap(50,43+i*36,9000+i);
@@ -210,8 +214,8 @@ static void metronome_classic(void)
      * vertical on the centre line, the face is blue-tinted, the base
      * is dark, and the weight sits on the 120 BPM mark (y=127). */
     app_theme("[IPOD]\nTHEME=1\nCLASSIC_LIGHT_ACCENT=0\nLIGHT=1\n", 12);
-    tap(50, 203, 0); /* Clocks & Timers row */
-    assert(app.screen == TIME_GROUP);
+    app.screen = TIME_GROUP; /* Hidden menu; verify retained metronome screen. */
+    app.focus = 0;
     tap(50, 78, 5000); /* Metronome row */
     assert(app.screen == METRONOME);
     /* expanded_utilities() above left it running; stop it so the
