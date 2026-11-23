@@ -20,9 +20,10 @@ A full-screen utility card app for the Shanling Q2 running [Q2 Pod](https://gith
 
 ## New tools and navigation
 
-The home screen preserves the original five tools, followed by **Clocks & Timers**
-(Pomodoro, Metronome, Countdown) and **Tools & Calculators** (Unit Converter,
-Random Generator, Date Calculator, Engineering Calculator, Event Counter).
+The home screen currently displays only the five established utilities:
+Stopwatch, World Clock, Calendar, To-do, and Calculator. The **Clocks & Timers**
+and **Tools & Calculators** menus (and their eight tools) are hidden pending UI
+redesign. Their source code, tests, and saved data formats remain intact.
 The home screen and both submenus have tiny 12×12 bitmap-font icons: glyphs
 are compiled into the executable and inherit the selected Q2 theme's colors
 in all Minimal, Modern, and Classic variants. No PNG or font files are needed.
