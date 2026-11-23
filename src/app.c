@@ -345,6 +345,14 @@ static void make_layout(const struct app *app, struct layout *layout)
                       app->screen==DATE_CALC?TOOL_DATE:
                       app->screen==ENGINEERING?TOOL_ENGINEERING:TOOL_COUNTER;
         int count=extra_button_count(kind);
+        if(app->screen==METRONOME) {
+            /* The classic pyramid fills y=54..198, so the metronome's
+             * keys sit lower and shorter than the other tools'. */
+            for(int i=0;i<count;i++)
+                button(layout,15+(i%3)*116,226+(i/3)*32,110,28,i,
+                       extra_button_label(&app->extra,kind,i));
+            break;
+        }
         for(int i=0;i<count;i++)
             button(layout,15+(i%3)*116,154+(i/3)*45,110,38,i,
                    extra_button_label(&app->extra,kind,i));
@@ -1219,6 +1227,161 @@ static void disc(uint32_t *pixels, unsigned stride, int cx, int cy, int r, uint3
     }
 }
 
+/* Convex-quad fill (scanline): the pyramid body, face, base and the
+ * pendulum's sliding weight are all quads, drawn with the firmware's
+ * own fill primitive — no image files, like the World Clock map. */
+static void fill_quad(uint32_t *pixels, unsigned stride,
+                      int x0, int y0, int x1, int y1,
+                      int x2, int y2, int x3, int y3, uint32_t color)
+{
+    const int xs[4] = {x0, x1, x2, x3}, ys[4] = {y0, y1, y2, y3};
+    int ymin = ys[0], ymax = ys[0];
+    for (int i = 1; i < 4; ++i) {
+        if (ys[i] < ymin) ymin = ys[i];
+        if (ys[i] > ymax) ymax = ys[i];
+    }
+    for (int y = ymin; y <= ymax; ++y) {
+        int xmin = 1 << 30, xmax = -(1 << 30);
+        for (int i = 0; i < 4; ++i) {
+            int j = (i + 1) % 4;
+            int ya = ys[i], yb = ys[j];
+            if ((ya <= y && y < yb) || (yb <= y && y < ya)) {
+                int x = xs[i] + (xs[j] - xs[i]) * (y - ya) / (yb - ya);
+                if (x < xmin) xmin = x;
+                if (x > xmax) xmax = x;
+            }
+        }
+        if (xmax >= xmin)
+            fill(pixels, stride, xmin, y, xmax - xmin + 1, 1, color);
+    }
+}
+
+static void segment(uint32_t *pixels, unsigned stride,
+                    int x0, int y0, int x1, int y1, uint32_t color)
+{
+    int dx = x1 - x0, dy = y1 - y0;
+    int adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+    int steps = adx > ady ? adx : ady;
+    if (!steps) {
+        fill(pixels, stride, x0, y0, 1, 1, color);
+        return;
+    }
+    for (int i = 0; i <= steps; ++i)
+        fill(pixels, stride, x0 + dx * i / steps, y0 + dy * i / steps, 1, 1, color);
+}
+
+/* The pendulum rod: a 5 px wide gold bar from pivot to tip. */
+static void rod(uint32_t *pixels, unsigned stride,
+                int x0, int y0, int x1, int y1, uint32_t color)
+{
+    int dx = x1 - x0, dy = y1 - y0;
+    int adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+    int steps = adx > ady ? adx : ady;
+    if (!steps) steps = 1;
+    for (int i = 0; i <= steps; i += 2)
+        fill(pixels, stride, x0 + dx * i / steps - 2, y0 + dy * i / steps - 2, 5, 5, color);
+}
+
+/* --- Classic metronome (Wittner pyramid) ---
+ * Trapezoid body with a blue-tinted face, a dark slotted base, tempo
+ * ticks down the face (40-208 BPM, log scale), and a gold pendulum
+ * pivoted at the base that swings at the beat: its angle comes from
+ * metro_pendulum_angle_deg, so the beat ticks as it crosses centre,
+ * and the sliding weight sits on the current BPM's scale mark. The
+ * palette is fixed mid-tone like the World Clock map's atlas colours
+ * (blue face, gold rod) so it reads on the light and dark paper;
+ * only the body and base follow the theme. No image files. */
+enum {
+    METRO_CX = 187, METRO_TOP_Y = 54, METRO_TOP_HALF = 31,
+    METRO_BOT_Y = 180, METRO_BOT_HALF = 56,
+    METRO_BASE_TOP_Y = 178, METRO_BASE_BOT_Y = 198, METRO_BASE_BOT_HALF = 62,
+    METRO_PIVOT_Y = 192, METRO_ROD_LEN = 122,
+    METRO_FACE_TOP_Y = 60, METRO_FACE_TOP_HALF = 26,
+    METRO_FACE_BOT_Y = 174, METRO_FACE_BOT_HALF = 50,
+    METRO_GOLD = 0xd9a821, METRO_GOLD_BRIGHT = 0xe8b93a, METRO_FACE_BLUE = 0x2a6ad8,
+};
+
+static void draw_metronome(struct app *app, uint32_t *pixels, unsigned stride,
+                           int64_t now, const char *bpm_line, const char *note)
+{
+    draw_text_fitted(pixels, stride, 20, 30, 335, bpm_line, ACCENT);
+    /* Body, then the inset face. */
+    fill_quad(pixels, stride,
+              METRO_CX - METRO_TOP_HALF, METRO_TOP_Y,
+              METRO_CX + METRO_TOP_HALF, METRO_TOP_Y,
+              METRO_CX + METRO_BOT_HALF, METRO_BOT_Y,
+              METRO_CX - METRO_BOT_HALF, METRO_BOT_Y,
+              blend(BG, INK, 24));
+    fill_quad(pixels, stride,
+              METRO_CX - METRO_FACE_TOP_HALF, METRO_FACE_TOP_Y,
+              METRO_CX + METRO_FACE_TOP_HALF, METRO_FACE_TOP_Y,
+              METRO_CX + METRO_FACE_BOT_HALF, METRO_FACE_BOT_Y,
+              METRO_CX - METRO_FACE_BOT_HALF, METRO_FACE_BOT_Y,
+              blend(BG, METRO_FACE_BLUE, 170));
+    /* Tempo scale: ticks at the face edges for 40..208 BPM. */
+    static const int marks[] = {40, 60, 80, 100, 120, 140, 160, 180, 208};
+    for (unsigned i = 0; i < sizeof marks / sizeof marks[0]; ++i) {
+        int y = metro_scale_y(marks[i], METRO_PIVOT_Y);
+        int half = METRO_FACE_TOP_HALF +
+                   (METRO_FACE_BOT_HALF - METRO_FACE_TOP_HALF) *
+                   (y - METRO_FACE_TOP_Y) / (METRO_FACE_BOT_Y - METRO_FACE_TOP_Y);
+        fill(pixels, stride, METRO_CX - half - 6, y, 9, 2, INK);
+        fill(pixels, stride, METRO_CX + half - 3, y, 9, 2, INK);
+    }
+    /* Dark base with three vent slots, wider towards the bottom. */
+    uint32_t base = SCHEME.paper == 0 ? 0x3a3a3a : 0x1c1c1c;
+    fill_quad(pixels, stride,
+              METRO_CX - METRO_BOT_HALF, METRO_BASE_TOP_Y,
+              METRO_CX + METRO_BOT_HALF, METRO_BASE_TOP_Y,
+              METRO_CX + METRO_BASE_BOT_HALF, METRO_BASE_BOT_Y,
+              METRO_CX - METRO_BASE_BOT_HALF, METRO_BASE_BOT_Y,
+              base);
+    static const int vents[][2] = {{183, 56}, {188, 68}, {193, 80}};
+    for (unsigned i = 0; i < sizeof vents / sizeof vents[0]; ++i)
+        fill(pixels, stride, METRO_CX - vents[i][1] / 2, vents[i][0],
+             vents[i][1], 3, BG);
+    /* Outlines: body, then base. */
+    segment(pixels, stride, METRO_CX - METRO_TOP_HALF, METRO_TOP_Y,
+            METRO_CX + METRO_TOP_HALF, METRO_TOP_Y, INK);
+    segment(pixels, stride, METRO_CX + METRO_TOP_HALF, METRO_TOP_Y,
+            METRO_CX + METRO_BOT_HALF, METRO_BOT_Y, INK);
+    segment(pixels, stride, METRO_CX - METRO_TOP_HALF, METRO_TOP_Y,
+            METRO_CX - METRO_BOT_HALF, METRO_BOT_Y, INK);
+    segment(pixels, stride, METRO_CX - METRO_BOT_HALF, METRO_BASE_TOP_Y,
+            METRO_CX - METRO_BASE_BOT_HALF, METRO_BASE_BOT_Y, INK);
+    segment(pixels, stride, METRO_CX + METRO_BOT_HALF, METRO_BASE_TOP_Y,
+            METRO_CX + METRO_BASE_BOT_HALF, METRO_BASE_BOT_Y, INK);
+    segment(pixels, stride, METRO_CX - METRO_BASE_BOT_HALF, METRO_BASE_BOT_Y,
+            METRO_CX + METRO_BASE_BOT_HALF, METRO_BASE_BOT_Y, INK);
+    /* Pendulum: at rest it hangs vertical; running, it swings at the
+     * beat. The weight rides on the current BPM's scale mark. */
+    const MetronomeState *m = &app->extra.metro;
+    double angle = m->running
+                       ? metro_pendulum_angle_deg(m->bpm, now - m->start_ms) : 0.0;
+    double sx, cy;
+    metro_rod_dir(angle, &sx, &cy);
+    int tip_x = METRO_CX + (int)(METRO_ROD_LEN * sx);
+    int tip_y = METRO_PIVOT_Y - (int)(METRO_ROD_LEN * cy);
+    rod(pixels, stride, METRO_CX, METRO_PIVOT_Y, tip_x, tip_y, METRO_GOLD);
+    disc(pixels, stride, tip_x, tip_y, 3, METRO_GOLD);
+    double dist = metro_weight_dist(m->bpm);
+    double wx = METRO_CX + dist * sx, wy = METRO_PIVOT_Y - dist * cy;
+    /* Weight block: 18 px along the rod, 16 across it. */
+    int wcx[4], wcy[4];
+    const double along[4] = {-9, 9, 9, -9}, across[4] = {-8, -8, 8, 8};
+    for (int i = 0; i < 4; ++i) {
+        wcx[i] = (int)(wx + along[i] * sx + across[i] * cy + 0.5);
+        wcy[i] = (int)(wy - along[i] * cy + across[i] * sx + 0.5);
+    }
+    fill_quad(pixels, stride, wcx[0], wcy[0], wcx[1], wcy[1],
+              wcx[2], wcy[2], wcx[3], wcy[3], METRO_GOLD_BRIGHT);
+    for (int i = 0; i < 4; ++i)
+        segment(pixels, stride, wcx[i], wcy[i], wcx[(i + 1) % 4], wcy[(i + 1) % 4], INK);
+    disc(pixels, stride, METRO_CX, METRO_PIVOT_Y, 4, INK);
+    disc(pixels, stride, METRO_CX, METRO_PIVOT_Y, 2, METRO_GOLD);
+    draw_text_fitted(pixels, stride, 20, 200, 335, note, MUTED);
+}
+
 static void draw_world_clock_map(struct app *app, uint32_t *pixels, unsigned stride,
                                  int64_t utc, const struct tm *today)
 {
@@ -1394,15 +1557,15 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         char first[96],second[96],third[96];
         extra_display(&app->extra,kind,now,today,first,sizeof first,
                       second,sizeof second,third,sizeof third);
-        draw_text_fitted(pixels,stride,20,51,335,first,ACCENT);
-        draw_text_fitted(pixels,stride,20,85,335,second,INK);
-        draw_text_fitted(pixels,stride,20,119,335,third,MUTED);
-        if(kind==TOOL_METRONOME && app->extra.metro.running) {
-            int beat=(int)(((uint64_t)(now-app->extra.metro.start_ms)*
-                            (unsigned)app->extra.metro.bpm/60000u)%
-                            (unsigned)app->extra.metro.beats_per_bar);
-            for(int i=0;i<app->extra.metro.beats_per_bar;i++)
-                fill(pixels,stride,50+i*46,141,28,6,i==beat?ACCENT:PANEL);
+        if(kind==TOOL_METRONOME) {
+            /* The classic pyramid replaces the text lines and the old
+             * beat dots: the swinging pendulum is the visual beat. */
+            (void)second;
+            draw_metronome(app,pixels,stride,now,first,third);
+        } else {
+            draw_text_fitted(pixels,stride,20,51,335,first,ACCENT);
+            draw_text_fitted(pixels,stride,20,85,335,second,INK);
+            draw_text_fitted(pixels,stride,20,119,335,third,MUTED);
         }
         break;
     }
