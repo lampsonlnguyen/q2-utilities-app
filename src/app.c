@@ -97,8 +97,13 @@ enum { RETURN_KEY = 170, CENTRE_KEY = 218, WHEEL_FINE = 16,
 
 struct button {
     int x, y, w, h, code;
-    char label[32];
+    char label[TASK_LENGTH + 8]; /* "[X] " + a full task name */
 };
+
+/* Task-options screen: the task name wraps onto up to TASK_LINES lines
+ * from y=TASK_TEXT_Y, and the action rows follow it. */
+enum { TASK_TEXT_Y = 34, TASK_LINE_H = 22, TASK_LINES = 6 };
+static int wrap_lines(const char *text, int width, char lines[][TASK_LENGTH + 4], int max_lines);
 
 struct layout {
     struct button items[36];
@@ -431,7 +436,7 @@ static void make_layout(const struct app *app, struct layout *layout)
     case TODO: {
         int start = app->task_page * TASKS_PER_PAGE;
         for (int i = start; i < app->task_count && i < start + TASKS_PER_PAGE; ++i) {
-            char label[32];
+            char label[TASK_LENGTH + 8];
             snprintf(label, sizeof label, "[%c] %s", app->tasks[i].done ? 'X' : ' ', app->tasks[i].text);
             button(layout, 0, 26 + (i - start) * 32, WIDTH, 32, i, label);
         }
@@ -443,12 +448,16 @@ static void make_layout(const struct app *app, struct layout *layout)
             button(layout, 259, 243, 98, 44, -3, "Page >");
         break;
     }
-    case TASK_ACTIONS:
-        /* List rows below the task text (drawn at y=36). */
-        button(layout, 0, 66, WIDTH, 32, 0,
+    case TASK_ACTIONS: {
+        /* List rows below the wrapped task text. */
+        char lines[TASK_LINES][TASK_LENGTH + 4];
+        int top = TASK_TEXT_Y + TASK_LINE_H *
+                  wrap_lines(app->tasks[app->task_index].text, WIDTH - 40, lines, TASK_LINES) + 8;
+        button(layout, 0, top, WIDTH, 32, 0,
                app->tasks[app->task_index].done ? "Mark open" : "Mark done");
-        button(layout, 0, 98, WIDTH, 32, 1, "Delete task");
+        button(layout, 0, top + 32, WIDTH, 32, 1, "Delete task");
         break;
+    }
     case EDIT_TASK: {
         const char *keys = app->symbols ? "0123456789.,!?-+/:@#&()'" : "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
         for (int i = 0; keys[i]; ++i) {
@@ -918,6 +927,67 @@ static void draw_text_fitted(uint32_t *pixels, unsigned stride, int x, int y, in
         }
         x += advance;
     }
+}
+
+/* Copy text into out, cut with "..." so it fits max_width; tail keeps
+ * the end instead (the task editor shows what was just typed). */
+static void fit_text(char *out, size_t size, const char *text, int max_width, bool tail)
+{
+    size_t length = strlen(text);
+    if (text_width(text) <= max_width || size < 5) {
+        snprintf(out, size, "%s", text);
+        return;
+    }
+    int room = max_width - text_width("..."), used = 0;
+    size_t n = 0;
+    while (n < length && n + 4 < size) {
+        int w = f20_adv[glyph((unsigned char)text[tail ? length - 1 - n : n])];
+        if (used + w > room)
+            break;
+        used += w;
+        ++n;
+    }
+    if (tail)
+        snprintf(out, size, "...%s", text + length - n);
+    else
+        snprintf(out, size, "%.*s...", (int)n, text);
+}
+
+/* Greedy word wrap into at most max_lines lines; a word wider than the
+ * line breaks between letters, and overflow ends the last line in "...".
+ * Returns the line count (at least 1). */
+static int wrap_lines(const char *text, int width, char lines[][TASK_LENGTH + 4], int max_lines)
+{
+    int count = 0;
+    while (count < max_lines) {
+        while (*text == ' ')
+            ++text;
+        size_t n = 0, cut = 0;
+        int used = 0;
+        while (text[n]) {
+            int w = f20_adv[glyph((unsigned char)text[n])];
+            if (used + w > width)
+                break;
+            used += w;
+            if (text[++n - 1] == ' ')
+                cut = n - 1;
+        }
+        if (text[n] && text[n] != ' ' && cut)
+            n = cut;
+        if (!n && text[0])
+            n = 1;
+        snprintf(lines[count++], TASK_LENGTH + 4, "%.*s", (int)n, text);
+        text += n;
+        while (*text == ' ')
+            ++text;
+        if (!*text)
+            return count;
+    }
+    /* More text than lines: mark the cut on the last line. */
+    char last[TASK_LENGTH + 8];
+    snprintf(last, sizeof last, "%s%s", lines[count - 1], text);
+    fit_text(lines[count - 1], TASK_LENGTH + 4, last, width, false);
+    return count;
 }
 
 static void draw_text(uint32_t *pixels, unsigned stride, int x, int y, const char *text, uint32_t color)
@@ -1781,6 +1851,9 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         snprintf(title, sizeof title, "%s", WC_CITIES[app->wc_selected].name);
     else
         snprintf(title, sizeof title, "%s", titles[app->screen]);
+    if (app->screen == EDIT_TASK && app->draft[0])
+        snprintf(title, sizeof title, "New task  %u/%u",
+                 (unsigned)strlen(app->draft) % 1000u, (unsigned)TASK_LENGTH);
     if (SCHEME.caps_bar)
         upper(title);
     centered(pixels, stride, 0, 3, WIDTH, title, INK);
@@ -1826,13 +1899,21 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         if (!app->task_count)
             draw_text(pixels, stride, 18, 44, "No tasks yet", MUTED);
         break;
-    case TASK_ACTIONS:
-        draw_text(pixels, stride, 20, 36, app->tasks[app->task_index].text, INK);
+    case TASK_ACTIONS: {
+        char lines[TASK_LINES][TASK_LENGTH + 4];
+        int count = wrap_lines(app->tasks[app->task_index].text, WIDTH - 40, lines, TASK_LINES);
+        for (int i = 0; i < count; ++i)
+            draw_text(pixels, stride, 20, TASK_TEXT_Y + i * TASK_LINE_H, lines[i], INK);
         break;
-    case EDIT_TASK:
+    }
+    case EDIT_TASK: {
+        /* Long names scroll: keep the end, where typing happens, visible. */
+        char shown[TASK_LENGTH + 8];
+        fit_text(shown, sizeof shown, app->draft[0] ? app->draft : "Task name", 319, true);
         fill(pixels, stride, 18, 36, 339, 30, PANEL);
-        draw_text_fitted(pixels, stride, 28, 43, 319, app->draft[0] ? app->draft : "Task name", app->draft[0] ? INK : MUTED);
+        draw_text_fitted(pixels, stride, 28, 43, 319, shown, app->draft[0] ? INK : MUTED);
         break;
+    }
     case CALCULATOR:
         fill(pixels, stride, 18, 34, 339, 36, PANEL);
         if (app->op && !app->error) {
@@ -1888,10 +1969,10 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
             /* System list rows: theme selection painter, theme text
              * edge, chevron on the selected row only. */
             paint_list_row(pixels, stride, item, selected);
-            char label[32];
-            snprintf(label, sizeof label, "%s", item->label);
+            char full[sizeof item->label], label[sizeof item->label];
+            snprintf(full, sizeof full, "%s", item->label);
             if (SCHEME.caps_rows)
-                upper(label);
+                upper(full);
             uint32_t color = selected ? sel_text_color() : INK;
             const bool with_icon=app->screen==HOME || app->screen==TIME_GROUP ||
                                  app->screen==TOOL_GROUP;
@@ -1901,6 +1982,12 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
                                menu_icon((enum screen)item->code),color);
                 label_x+=19;
             }
+            /* Task names (up to TASK_LENGTH) end in "..." rather than
+             * squeezing; menu labels keep draw_text_fitted's narrowing. */
+            if (app->screen == TODO)
+                fit_text(label, sizeof label, full, WIDTH - label_x - 40, false);
+            else
+                snprintf(label, sizeof label, "%s", full);
             draw_text_fitted(pixels,stride,label_x,y,
                              WIDTH-label_x-40,label,color);
             if (selected)

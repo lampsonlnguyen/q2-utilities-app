@@ -152,6 +152,28 @@ static void tasks(const char *path)
     tap(50, 114, 0); /* Delete task row: y=98..129 */
     app_init(&app, path);
     assert(app.task_count == 0);
+
+    /* Names hold TASK_LENGTH (140) characters; the 141st is ignored,
+     * and the full name survives a save and reload. */
+    tap(50, 138, 0);
+    tap(50, 250, 0);
+    for (int i = 0; i <= TASK_LENGTH; ++i)
+        tap(25, 105, 0); /* A */
+    assert(strlen(app.draft) == TASK_LENGTH);
+    tap(295, 250, 0);
+    app_init(&app, path);
+    assert(app.task_count == 1 && strlen(app.tasks[0].text) == TASK_LENGTH);
+    /* 140 "A"s wrap onto all six lines, so the options rows start at
+     * y=34+6*22+8=174: Mark done 174..205, Delete task 206..237. */
+    tap(50, 138, 0);
+    tap(50, 42, 0);
+    assert(app.screen == TASK_ACTIONS);
+    tap(50, 190, 0);
+    assert(app.tasks[0].done);
+    tap(50, 42, 0);
+    tap(50, 220, 0);
+    app_init(&app, path);
+    assert(app.task_count == 0);
 }
 
 static void expanded_utilities(void)
