@@ -162,7 +162,7 @@ static void expanded_utilities(void)
     assert(app.screen==TIME_GROUP);
     tap(50,42,0);
     assert(app.screen==POMODORO);
-    tap(50,171,1000);
+    tap(50,212,1000);
     assert(app.extra.pomo.running);
     back();assert(app.screen==TIME_GROUP);
     tap(50,78,5000);
@@ -172,7 +172,7 @@ static void expanded_utilities(void)
     back();assert(app.screen==TIME_GROUP);
     tap(50,114,7000);
     assert(app.screen==COUNTDOWN);
-    tap(50,171,7000);
+    tap(50,212,7000);
     assert(app.extra.countdown.running);
     back();assert(app.screen==TIME_GROUP);
     back();assert(app.screen==HOME);
@@ -184,7 +184,7 @@ static void expanded_utilities(void)
         tap(50,43+i*36,9000+i);
         assert(app.screen==types[i]);
         if(app.screen==EVENT_COUNTER) {
-            tap(50,171,10000); /* +1 */
+            tap(50,212,10000); /* +1 */
             assert(app.extra.counter.values[0]==1 && !app.extra.counter.save_error);
         }
         back();
