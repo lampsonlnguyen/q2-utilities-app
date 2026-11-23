@@ -68,7 +68,8 @@ void extra_init(ExtraTools *s, const char *task_path) {
         int v[4], count=0;
         for(;count<4 && fscanf(f,"%d",&v[count])==1;count++)
             if(v[count]<0||v[count]>COUNTER_LIMIT)break;
-        int extra=fgetc(f);
+        int extra;
+        do {extra=fgetc(f);} while(extra==' ' || extra=='\t' || extra=='\r' || extra=='\n');
         fclose(f);
         if(count==4 && extra==EOF)memcpy(s->counter.values,v,sizeof v);
     }
@@ -294,9 +295,9 @@ const char *extra_button_label(const ExtraTools *s,ToolKind kind,int code) {
 }
 void extra_display(const ExtraTools *s,ToolKind kind,int64_t now,
                    const struct tm *today,char *a,size_t na,char *b,size_t nb,char *c,size_t nc) {
-    snprintf(a,na,"");
-    snprintf(b,nb,"");
-    snprintf(c,nc,"");
+    if(na)a[0]=0;
+    if(nb)b[0]=0;
+    if(nc)c[0]=0;
     switch(kind) {
     case TOOL_POMODORO: {
         const PomodoroState *p=&s->pomo;
