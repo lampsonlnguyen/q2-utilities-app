@@ -59,7 +59,7 @@ static int launch_error(const char *message)
     return 1;
 }
 
-static void load_theme(int hour)
+static void load_config(struct app *app, int hour)
 {
     char config[16384];
     size_t length=0;
@@ -70,6 +70,7 @@ static void load_theme(int hour)
     }
     config[length]='\0';
     app_theme(config, hour);
+    app_wheel_config(app, config);
 }
 
 int main(void)
@@ -123,7 +124,7 @@ int main(void)
             today = local;
         if (theme_hour != today.tm_hour) {
             theme_hour = today.tm_hour;
-            load_theme(theme_hour);
+            load_config(&app, theme_hour);
         }
         int64_t now = monotonic_ms();
         if (can_pan) {
