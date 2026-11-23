@@ -33,9 +33,9 @@ $(CARD)/q2app: q2app
 dist/.utilities-app.zip: $(CARD)/q2-utilities-app $(CARD)/q2app
 	cd dist && rm -f .utilities-app.zip && zip -q .utilities-app.zip .utilities-app/q2app .utilities-app/q2-utilities-app
 
-build/host/check: tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c src/extra_tools.c src/extra_tools.c src/app.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/font.h
+build/host/check: tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c src/extra_tools.c src/app.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/font.h
 	mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -std=gnu11 -Isrc -o $@ tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -std=gnu11 -Isrc -o $@ tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c src/extra_tools.c
 
 build/host/test_scheme: tests/test_scheme.c src/q2pod_scheme.c src/q2pod_scheme.h
 	mkdir -p $(@D)
