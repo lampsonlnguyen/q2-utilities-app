@@ -1407,6 +1407,168 @@ static void draw_world_clock_detail(struct app *app, uint32_t *pixels, unsigned 
     centered(pixels, stride, 18, 172, 339, value, MUTED);
 }
 
+/* Small-device display language:
+ * One glanceable result above the fold; controls below.
+ * Scale the existing anti-aliased Q2 font at render time rather than shipping
+ * large bitmaps or a second font. No dynamic allocations. */
+static void large_centered(uint32_t *pixels,unsigned stride,int y,
+                           const char *label,int desired_scale,uint32_t color)
+{
+    if(!label || !*label)return;
+    int scale=desired_scale;
+    while(scale>1 && text_width(label)*scale>WIDTH-28)scale--;
+    int w=text_width(label)*scale;
+    int x=(WIDTH-w)/2;
+    for(const unsigned char *ch=(const unsigned char *)label;*ch;ch++) {
+        int index=glyph(*ch), advance=f20_adv[index];
+        const unsigned char *bitmap=f20_px+f20_off[index];
+        for(int r=0;r<F20_H*scale;r++) {
+            if(y+r>=HEIGHT)break;
+            for(int c=0;c<advance*scale;c++) {
+                int src_r=r/scale,src_c=c/scale;
+                unsigned alpha=bitmap[src_r*advance+src_c];
+                if(alpha) {
+                    uint32_t *p=&pixels[(x+c)*stride+(HEIGHT-1-y-r)];
+                    *p=0xff000000u|(alpha==255?color:blend(*p,color,alpha));
+                }
+            }
+        }
+        x+=advance*scale;
+    }
+}
+static int64_t tool_remaining(int64_t due,int64_t cached,int64_t now,bool running)
+{
+    if(!running)return cached;
+    return due>now?due-now:0;
+}
+static void progress_bar(uint32_t *pixels,unsigned stride,int64_t rem,int64_t total)
+{
+    const int x=29,y=163,w=317,h=6;
+    fill(pixels,stride,x,y,w,h,SCHEME.fill);
+    if(total<=0) return;
+    if(rem<0)rem=0;
+    if(rem>total)rem=total;
+    int active=(int)(rem*w/total);
+    if(active>0)fill(pixels,stride,x,y,active,h,ACCENT);
+}
+static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
+                      int64_t now,const struct tm *today)
+{
+    ToolKind kind=app->screen==POMODORO?TOOL_POMODORO:
+                  app->screen==METRONOME?TOOL_METRONOME:
+                  app->screen==COUNTDOWN?TOOL_COUNTDOWN:
+                  app->screen==CONVERTER?TOOL_CONVERTER:
+                  app->screen==RANDOMIZER?TOOL_RANDOM:
+                  app->screen==DATE_CALC?TOOL_DATE:
+                  app->screen==ENGINEERING?TOOL_ENGINEERING:TOOL_COUNTER;
+    char a[96],b[96],c[96];
+    extra_display(&app->extra,kind,now,today,a,sizeof a,b,sizeof b,c,sizeof c);
+    switch(kind) {
+    case TOOL_POMODORO: {
+        const PomodoroState *p=&app->extra.pomo;
+        centered(pixels,stride,0,35,WIDTH,p->phase?"SHORT BREAK":"FOCUS SESSION",MUTED);
+        const char *short_time=(a[0]=='0'&&a[1]=='0'&&a[2]==':')?a+3:a;
+        large_centered(pixels,stride,68,short_time,2,ACCENT);
+        centered(pixels,stride,0,124,WIDTH,p->running?"IN PROGRESS":"READY / PAUSED",INK);
+        int64_t rem=tool_remaining(p->due_ms,p->remaining_ms,now,p->running);
+        int64_t total=(int64_t)(p->phase?p->break_minutes:p->work_minutes)*60000;
+        progress_bar(pixels,stride,rem,total);
+        char line[64];
+        snprintf(line,sizeof line,"FOCUS %dm  /  REST %dm  /  %d SESSIONS",
+                 p->work_minutes,p->break_minutes,p->sessions);
+        draw_text_fitted(pixels,stride,28,174,WIDTH-56,line,MUTED);
+        break;
+    }
+    case TOOL_METRONOME: {
+        const MetronomeState *m=&app->extra.metro;
+        centered(pixels,stride,0,36,WIDTH,"TEMPO",MUTED);
+        char tempo[24];snprintf(tempo,sizeof tempo,"%d",m->bpm);
+        large_centered(pixels,stride,66,tempo,2,ACCENT);
+        centered(pixels,stride,0,115,WIDTH,"BEATS PER MINUTE",MUTED);
+        const int count=m->beats_per_bar;
+        int beat=0;
+        if(m->running && now>=m->start_ms)
+            beat=(int)(((uint64_t)(now-m->start_ms)*(unsigned)m->bpm/60000u)%
+                       (unsigned)count);
+        const int dotw=23,gap=14,groupw=count*(dotw+gap)-gap;
+        for(int i=0;i<count;i++)
+            fill(pixels,stride,(WIDTH-groupw)/2+i*(dotw+gap),146,
+                 dotw,15,(m->running && beat==i)?ACCENT:SCHEME.fill);
+        centered(pixels,stride,0,169,WIDTH,
+                 m->running?"VISUAL BEAT ACTIVE":"VISUAL ONLY  /  PRESS START",MUTED);
+        break;
+    }
+    case TOOL_COUNTDOWN: {
+        const CountdownState *t=&app->extra.countdown;
+        centered(pixels,stride,0,35,WIDTH,"COUNTDOWN",MUTED);
+        const char *short_time=(a[0]=='0'&&a[1]=='0'&&a[2]==':')?a+3:a;
+        large_centered(pixels,stride,68,short_time,2,ACCENT);
+        centered(pixels,stride,0,124,WIDTH,
+                 t->running?"RUNNING":t->remaining_ms==0?"TIME ELAPSED":"READY / PAUSED",INK);
+        progress_bar(pixels,stride,
+                     tool_remaining(t->due_ms,t->remaining_ms,now,t->running),
+                     t->preset_ms);
+        centered(pixels,stride,0,173,WIDTH,"ADJUST DURATION BELOW",MUTED);
+        break;
+    }
+    case TOOL_CONVERTER: {
+        centered(pixels,stride,0,31,WIDTH,"FROM",MUTED);
+        large_centered(pixels,stride,53,a,2,INK);
+        fill(pixels,stride,32,102,WIDTH-64,2,SCHEME.fill);
+        centered(pixels,stride,0,110,WIDTH,"CONVERTED VALUE",MUTED);
+        const char *converted=(b[0]=='=' && b[1]==' ')?b+2:b;
+        large_centered(pixels,stride,135,converted,2,ACCENT);
+        break;
+    }
+    case TOOL_RANDOM: {
+        centered(pixels,stride,0,35,WIDTH,b,MUTED);
+        if(app->extra.random.result==0 && app->extra.random.kind==0)
+            large_centered(pixels,stride,71,"--",2,ACCENT);
+        else
+            large_centered(pixels,stride,71,a,2,ACCENT);
+        centered(pixels,stride,0,132,WIDTH,c,MUTED);
+        fill(pixels,stride,32,166,WIDTH-64,2,SCHEME.fill);
+        break;
+    }
+    case TOOL_DATE: {
+        centered(pixels,stride,0,35,WIDTH,"CALCULATED DATE",MUTED);
+        large_centered(pixels,stride,71,a,2,ACCENT);
+        centered(pixels,stride,0,127,WIDTH,b,INK);
+        centered(pixels,stride,0,162,WIDTH,"BASED ON Q2 LOCAL DATE",MUTED);
+        break;
+    }
+    case TOOL_ENGINEERING: {
+        centered(pixels,stride,0,33,WIDTH,
+                 app->extra.engineering.mode==0?"OHM'S LAW":
+                 app->extra.engineering.mode==1?"VOLTAGE DIVIDER":"BATTERY ESTIMATE",MUTED);
+        large_centered(pixels,stride,64,a,2,ACCENT);
+        draw_text_fitted(pixels,stride,22,124,WIDTH-44,b,INK);
+        draw_text_fitted(pixels,stride,22,161,WIDTH-44,c,MUTED);
+        break;
+    }
+    case TOOL_COUNTER: {
+        const EventCounterState *e=&app->extra.counter;
+        char name[32],number[28];
+        snprintf(name,sizeof name,"COUNTER %c",'A'+e->selected);
+        snprintf(number,sizeof number,"%d",e->values[e->selected]);
+        centered(pixels,stride,0,35,WIDTH,name,MUTED);
+        large_centered(pixels,stride,66,number,2,ACCENT);
+        for(int i=0;i<4;i++) {
+            int x=13+i*91, selected=i==e->selected;
+            fill(pixels,stride,x,141,83,35,selected?SCHEME.fill:BG);
+            if(selected)fill(pixels,stride,x,174,83,2,ACCENT);
+            char label[28];snprintf(label,sizeof label,"%c %d",'A'+i,e->values[i]);
+            draw_text_fitted(pixels,stride,x+5,148,73,label,
+                             selected?INK:MUTED);
+        }
+        if(e->save_error)
+            centered(pixels,stride,0,177,WIDTH,"SD CARD WRITE FAILED",SCHEME.accent_red);
+        break;
+    }
+    default:break;
+    }
+}
+
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, time_t utc, const struct tm *today)
 {
     extra_tick(&app->extra,now);
@@ -1443,19 +1605,8 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
                       app->screen==RANDOMIZER?TOOL_RANDOM:
                       app->screen==DATE_CALC?TOOL_DATE:
                       app->screen==ENGINEERING?TOOL_ENGINEERING:TOOL_COUNTER;
-        char first[96],second[96],third[96];
-        extra_display(&app->extra,kind,now,today,first,sizeof first,
-                      second,sizeof second,third,sizeof third);
-        draw_text_fitted(pixels,stride,20,51,335,first,ACCENT);
-        draw_text_fitted(pixels,stride,20,85,335,second,INK);
-        draw_text_fitted(pixels,stride,20,119,335,third,MUTED);
-        if(kind==TOOL_METRONOME && app->extra.metro.running) {
-            int beat=(int)(((uint64_t)(now-app->extra.metro.start_ms)*
-                            (unsigned)app->extra.metro.bpm/60000u)%
-                            (unsigned)app->extra.metro.beats_per_bar);
-            for(int i=0;i<app->extra.metro.beats_per_bar;i++)
-                fill(pixels,stride,50+i*46,141,28,6,i==beat?ACCENT:PANEL);
-        }
+        (void)kind;
+        tool_hero(app,pixels,stride,now,today);
         break;
     }
     case STOPWATCH:
