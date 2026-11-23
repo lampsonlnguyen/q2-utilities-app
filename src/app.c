@@ -1443,7 +1443,7 @@ static int64_t tool_remaining(int64_t due,int64_t cached,int64_t now,bool runnin
 }
 static void progress_bar(uint32_t *pixels,unsigned stride,int64_t rem,int64_t total)
 {
-    const int x=29,y=163,w=317,h=6;
+    const int x=29,y=151,w=317,h=6;
     fill(pixels,stride,x,y,w,h,SCHEME.fill);
     if(total<=0) return;
     if(rem<0)rem=0;
@@ -1476,7 +1476,7 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
         char line[64];
         snprintf(line,sizeof line,"FOCUS %dm  /  REST %dm  /  %d SESSIONS",
                  p->work_minutes,p->break_minutes,p->sessions);
-        draw_text_fitted(pixels,stride,28,174,WIDTH-56,line,MUTED);
+        draw_text_fitted(pixels,stride,28,163,WIDTH-56,line,MUTED);
         break;
     }
     case TOOL_METRONOME: {
@@ -1494,7 +1494,7 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
         for(int i=0;i<count;i++)
             fill(pixels,stride,(WIDTH-groupw)/2+i*(dotw+gap),146,
                  dotw,15,(m->running && beat==i)?ACCENT:SCHEME.fill);
-        centered(pixels,stride,0,169,WIDTH,
+        centered(pixels,stride,0,166,WIDTH,
                  m->running?"VISUAL BEAT ACTIVE":"VISUAL ONLY  /  PRESS START",MUTED);
         break;
     }
@@ -1508,7 +1508,7 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
         progress_bar(pixels,stride,
                      tool_remaining(t->due_ms,t->remaining_ms,now,t->running),
                      t->preset_ms);
-        centered(pixels,stride,0,173,WIDTH,"ADJUST DURATION BELOW",MUTED);
+        centered(pixels,stride,0,163,WIDTH,"ADJUST DURATION BELOW",MUTED);
         break;
     }
     case TOOL_CONVERTER: {
@@ -1551,7 +1551,9 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
         char name[32],number[28];
         snprintf(name,sizeof name,"COUNTER %c",'A'+e->selected);
         snprintf(number,sizeof number,"%d",e->values[e->selected]);
-        centered(pixels,stride,0,35,WIDTH,name,MUTED);
+        centered(pixels,stride,0,35,WIDTH,
+                 e->save_error?"SD CARD WRITE FAILED":name,
+                 e->save_error?SCHEME.accent_red:MUTED);
         large_centered(pixels,stride,66,number,2,ACCENT);
         for(int i=0;i<4;i++) {
             int x=13+i*91, selected=i==e->selected;
@@ -1561,8 +1563,6 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
             draw_text_fitted(pixels,stride,x+5,148,73,label,
                              selected?INK:MUTED);
         }
-        if(e->save_error)
-            centered(pixels,stride,0,177,WIDTH,"SD CARD WRITE FAILED",SCHEME.accent_red);
         break;
     }
     default:break;
@@ -1708,14 +1708,30 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
                           SCHEME.painter == Q2POD_SEL_CARD ? SCHEME.chevron
                                                            : sel_text_color());
         } else {
-            /* Action keys keep their buttons, painted with the theme's
-             * selection when focused instead of a flat fill. */
-            if (selected)
-                paint_selection(pixels, stride, item->x, item->y, item->w, item->h);
-            else
-                fill(pixels, stride, item->x, item->y, item->w, item->h, PANEL);
-            uint32_t color = selected ? sel_text_color() : INK;
-            centered(pixels, stride, item->x, y, item->w, item->label, color);
+            /* Dedicated tool controls: a clear primary action and calm
+             * secondary keys, preserving Q2 Pod's selection painter. */
+            bool tool=app->screen>=POMODORO && app->screen<=EVENT_COUNTER;
+            uint32_t color=selected?sel_text_color():INK;
+            if(selected)
+                paint_selection(pixels,stride,item->x,item->y,item->w,item->h);
+            else if(tool) {
+                if(item->code==0) {
+                    fill(pixels,stride,item->x,item->y,item->w,item->h,
+                         SCHEME.accent_top);
+                    color=0xffffffu;
+                } else {
+                    fill(pixels,stride,item->x,item->y,item->w,item->h,SCHEME.fill);
+                    uint32_t edge=SCHEME.paper==0?0x414141u:0xc6c6c6u;
+                    outline(pixels,stride,item->x,item->y,item->w,item->h,edge);
+                }
+            } else
+                fill(pixels,stride,item->x,item->y,item->w,item->h,PANEL);
+            /* Some labels (e.g. +/-10 BPM) are wider than the four-key
+             * secondary strips. Fit those labels without clipping. */
+            int label_x=item->x+(item->w-text_width(item->label))/2;
+            if(label_x<item->x+4)label_x=item->x+4;
+            draw_text_fitted(pixels,stride,label_x,y,
+                             item->w-(label_x-item->x)-4,item->label,color);
         }
     }
 }
