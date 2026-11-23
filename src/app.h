@@ -30,7 +30,12 @@ struct app {
     int year, month;
     struct task tasks[TASK_LIMIT];
     int task_count, task_index, task_page;
-    bool save_failed, load_failed, symbols;
+    bool save_failed, load_failed;
+    /* T9 editor (Q2's kb_default_t9 layout): case and 123 pages, and the
+     * open multi-tap key, its letter index and when it was pressed. */
+    bool t9_upper, t9_digits;
+    int t9_last, t9_tap;
+    int64_t t9_at;
     char draft[TASK_LENGTH + 1];
     const char *task_path;
     int wc_top, wc_selected;
