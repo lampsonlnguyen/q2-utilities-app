@@ -1426,10 +1426,23 @@ static void large_centered(uint32_t *pixels,unsigned stride,int y,
             if(y+r>=HEIGHT)break;
             for(int c=0;c<advance*scale;c++) {
                 int src_r=r/scale,src_c=c/scale;
-                unsigned alpha=bitmap[src_r*advance+src_c];
+                int r2=src_r+1<F20_H?src_r+1:src_r;
+                int c2=src_c+1<advance?src_c+1:src_c;
+                /* Bilinear alpha interpolation keeps 2x enlarged
+                 * bitmap-font numerals smooth, not pixel-blocky. */
+                int rx=r%scale,cx=c%scale;
+                unsigned a00=bitmap[src_r*advance+src_c];
+                unsigned a01=bitmap[src_r*advance+c2];
+                unsigned a10=bitmap[r2*advance+src_c];
+                unsigned a11=bitmap[r2*advance+c2];
+                unsigned alpha=(a00*(unsigned)(scale-rx)*(unsigned)(scale-cx)
+                              +a01*(unsigned)(scale-rx)*(unsigned)cx
+                              +a10*(unsigned)rx*(unsigned)(scale-cx)
+                              +a11*(unsigned)rx*(unsigned)cx)/
+                              (unsigned)(scale*scale);
                 if(alpha) {
                     uint32_t *p=&pixels[(x+c)*stride+(HEIGHT-1-y-r)];
-                    *p=0xff000000u|(alpha==255?color:blend(*p,color,alpha));
+                    *p=0xff000000u|(alpha>=255?color:blend(*p,color,alpha));
                 }
             }
         }
