@@ -97,8 +97,89 @@ enum { RETURN_KEY = 170, CENTRE_KEY = 218, WHEEL_FINE = 16,
 
 struct button {
     int x, y, w, h, code;
-    char label[32];
+    char label[TASK_LENGTH + 8]; /* "[X] " + a full task name */
 };
+
+/* Task-options screen: the task name wraps onto up to TASK_LINES lines
+ * from y=TASK_TEXT_Y, and the action rows follow it. */
+enum { TASK_TEXT_Y = 34, TASK_LINE_H = 22, TASK_LINES = 6 };
+static int wrap_lines(const char *text, int width, char lines[][TASK_LENGTH + 4], int max_lines);
+
+/* The task editor's keyboard: the Q2's own T9 keypad (Shanling's stock
+ * kb_default_t9, a 4x4 AWTK keypad, as Q2 Pod shows it, EN being a case
+ * key), as Books (q2-books' T9Keypad) draws it too:
+ *
+ *   ,      abc    def    DEL
+ *   ghi    jkl    mno    ABC   (case: abc on the capitals)
+ *   pqrs   tuv    wxyz   123   (digits: each key types its number)
+ *   .?!    space  Done   CLR
+ *
+ * Letters are multi-tap: the same key again within T9_REPEAT_MS replaces
+ * the letter just typed with the key's next one; another key or a pause
+ * keeps it. The letter is in the text from the first press, so no timer
+ * is needed. Button codes are the key indexes. */
+enum { T9_COMMA, T9_ABC, T9_DEF, T9_DEL, T9_GHI, T9_JKL, T9_MNO, T9_CASE,
+       T9_PQRS, T9_TUV, T9_WXYZ, T9_DIGITS, T9_STOPS, T9_SPACE, T9_DONE, T9_CLEAR,
+       T9_KEYS, T9_REPEAT_MS = 1200,
+       KB_X = 12, KB_Y = 92, KB_W = 86, KB_H = 52, KB_GAP_X = 2, KB_GAP_Y = 3 };
+
+static bool t9_function(int key)
+{
+    return key == T9_DEL || key == T9_CASE || key == T9_DIGITS || key == T9_DONE ||
+           key == T9_CLEAR;
+}
+
+/* The characters a key cycles through (empty for function keys). */
+static void t9_letters(const struct app *app, int key, char *out, size_t size)
+{
+    static const char *const lower[T9_KEYS] = {",'-:;", "abc", "def", "", "ghi", "jkl", "mno", "",
+                                               "pqrs", "tuv", "wxyz", "", ".?!", " ", "", ""};
+    static const char digit[T9_KEYS] = {'1','2','3',0,'4','5','6',0,'7','8','9',0,'0',' ',0,0};
+    out[0] = '\0';
+    if (key < 0 || key >= T9_KEYS)
+        return;
+    if (app->t9_digits) {
+        if (digit[key])
+            snprintf(out, size, "%c", digit[key]);
+        return;
+    }
+    snprintf(out, size, "%s", lower[key]);
+    for (char *c = out; app->t9_upper && *c; ++c)
+        if (*c >= 'a' && *c <= 'z')
+            *c -= 'a' - 'A';
+}
+
+static void t9_label(const struct app *app, int key, char *out, size_t size)
+{
+    switch (key) {
+    case T9_DEL: snprintf(out, size, "DEL"); break;
+    case T9_CASE: snprintf(out, size, "%s", app->t9_upper ? "abc" : "ABC"); break;
+    case T9_DIGITS: snprintf(out, size, "%s", app->t9_digits ? "abc" : "123"); break;
+    case T9_SPACE: snprintf(out, size, "space"); break;
+    case T9_DONE: snprintf(out, size, "Done"); break;
+    case T9_CLEAR: snprintf(out, size, "CLR"); break;
+    case T9_COMMA: snprintf(out, size, "%s", app->t9_digits ? "1" : ","); break;
+    default: t9_letters(app, key, out, size); break;
+    }
+}
+
+/* The key whose letters show above the keypad while a multi-tap is open
+ * (-1 when none is); app->t9_tap is which of them is in the text. */
+static int t9_pending(const struct app *app, int64_t now)
+{
+    char set[8];
+    if (app->t9_last < 0 || now - app->t9_at > T9_REPEAT_MS)
+        return -1;
+    t9_letters(app, app->t9_last, set, sizeof set);
+    return strlen(set) > 1 ? app->t9_last : -1;
+}
+
+static void t9_reset(struct app *app)
+{
+    app->t9_upper = app->t9_digits = false;
+    app->t9_last = -1;
+    app->t9_tap = 0;
+}
 
 struct layout {
     struct button items[36];
@@ -431,7 +512,7 @@ static void make_layout(const struct app *app, struct layout *layout)
     case TODO: {
         int start = app->task_page * TASKS_PER_PAGE;
         for (int i = start; i < app->task_count && i < start + TASKS_PER_PAGE; ++i) {
-            char label[32];
+            char label[TASK_LENGTH + 8];
             snprintf(label, sizeof label, "[%c] %s", app->tasks[i].done ? 'X' : ' ', app->tasks[i].text);
             button(layout, 0, 26 + (i - start) * 32, WIDTH, 32, i, label);
         }
@@ -443,24 +524,25 @@ static void make_layout(const struct app *app, struct layout *layout)
             button(layout, 259, 243, 98, 44, -3, "Page >");
         break;
     }
-    case TASK_ACTIONS:
-        /* List rows below the task text (drawn at y=36). */
-        button(layout, 0, 66, WIDTH, 32, 0,
+    case TASK_ACTIONS: {
+        /* List rows below the wrapped task text. */
+        char lines[TASK_LINES][TASK_LENGTH + 4];
+        int top = TASK_TEXT_Y + TASK_LINE_H *
+                  wrap_lines(app->tasks[app->task_index].text, WIDTH - 40, lines, TASK_LINES) + 8;
+        button(layout, 0, top, WIDTH, 32, 0,
                app->tasks[app->task_index].done ? "Mark open" : "Mark done");
-        button(layout, 0, 98, WIDTH, 32, 1, "Delete task");
-        break;
-    case EDIT_TASK: {
-        const char *keys = app->symbols ? "0123456789.,!?-+/:@#&()'" : "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        for (int i = 0; keys[i]; ++i) {
-            char label[] = {keys[i], 0};
-            button(layout, 18 + i % 8 * 43, 99 + i / 8 * 35, 38, 30, keys[i], label);
-        }
-        button(layout, 18, 245, 77, 39, 1, app->symbols ? "ABC" : "123");
-        button(layout, 101, 245, 82, 39, ' ', "Space");
-        button(layout, 189, 245, 75, 39, 2, "Erase");
-        button(layout, 270, 245, 87, 39, 3, "Save");
+        button(layout, 0, top + 32, WIDTH, 32, 1, "Delete task");
         break;
     }
+    case EDIT_TASK:
+        /* T9 keypad under the field and the open key's letters. */
+        for (int key = 0; key < T9_KEYS; ++key) {
+            char label[8];
+            t9_label(app, key, label, sizeof label);
+            button(layout, KB_X + key % 4 * (KB_W + KB_GAP_X), KB_Y + key / 4 * (KB_H + KB_GAP_Y),
+                   KB_W, KB_H, key, label);
+        }
+        break;
     case CALCULATOR: {
         const char *keys = "789/456*123-0.=+C<";
         for (int i = 0; keys[i]; ++i) {
@@ -497,34 +579,71 @@ static void task_action(struct app *app, int code)
     screen(app, TODO);
 }
 
-static void edit_task(struct app *app, int code)
+static void save_draft(struct app *app)
 {
     size_t length = strlen(app->draft);
-    if (code == 1) {
-        app->symbols = !app->symbols;
-        app->focus = 0;
-    } else if (code == 2 && length) {
-        app->draft[length - 1] = '\0';
-    } else if (code == 3) {
-        const char *start = app->draft + strspn(app->draft, " ");
-        while (length && app->draft[length - 1] == ' ')
-            --length;
-        if (app->draft + length <= start)
+    const char *start = app->draft + strspn(app->draft, " ");
+    while (length && app->draft[length - 1] == ' ')
+        --length;
+    if (app->draft + length <= start)
+        return;
+    struct task *task = &app->tasks[app->task_count++];
+    *task = (struct task){0};
+    memcpy(task->text, start, (size_t)(app->draft + length - start));
+    app->save_failed = !save_tasks(app);
+    if (app->save_failed)
+        --app->task_count;
+    else {
+        app->task_page = (app->task_count - 1) / TASKS_PER_PAGE;
+        screen(app, TODO);
+    }
+}
+
+static void edit_task(struct app *app, int key, int64_t now)
+{
+    size_t length = strlen(app->draft);
+    bool repeat = key == app->t9_last && now - app->t9_at <= T9_REPEAT_MS;
+    switch (key) {
+    case T9_DEL:
+        if (length)
+            app->draft[length - 1] = '\0';
+        app->t9_last = -1;
+        return;
+    case T9_CLEAR:
+        app->draft[0] = '\0';
+        app->t9_last = -1;
+        return;
+    case T9_CASE:
+        app->t9_upper = !app->t9_upper;
+        app->t9_digits = false;
+        app->t9_last = -1;
+        return;
+    case T9_DIGITS:
+        app->t9_digits = !app->t9_digits;
+        app->t9_last = -1;
+        return;
+    case T9_DONE:
+        app->t9_last = -1;
+        save_draft(app);
+        return;
+    }
+    char set[8];
+    t9_letters(app, key, set, sizeof set);
+    size_t count = strlen(set);
+    if (!count)
+        return;
+    if (repeat && count > 1 && length) {
+        app->t9_tap = (app->t9_tap + 1) % (int)count;
+        app->draft[length - 1] = set[app->t9_tap];
+    } else {
+        if (length >= TASK_LENGTH)
             return;
-        struct task *task = &app->tasks[app->task_count++];
-        *task = (struct task){0};
-        memcpy(task->text, start, (size_t)(app->draft + length - start));
-        app->save_failed = !save_tasks(app);
-        if (app->save_failed)
-            --app->task_count;
-        else {
-            app->task_page = (app->task_count - 1) / TASKS_PER_PAGE;
-            screen(app, TODO);
-        }
-    } else if (code >= ' ' && length < TASK_LENGTH) {
-        app->draft[length] = (char)code;
+        app->t9_tap = 0;
+        app->draft[length] = set[0];
         app->draft[length + 1] = '\0';
     }
+    app->t9_last = key;
+    app->t9_at = now;
 }
 
 static void activate(struct app *app, int code, int64_t now, const struct tm *today)
@@ -600,9 +719,10 @@ static void activate(struct app *app, int code, int64_t now, const struct tm *to
     case TODO:
         if (code == -1) {
             app->draft[0] = '\0';
-            app->symbols = false;
+            t9_reset(app);
             app->save_failed = false;
             screen(app, EDIT_TASK);
+            app->focus = T9_ABC; /* the wheel starts on abc, as Q2's T9 */
         } else if (code < 0) {
             app->task_page += code == -2 ? -1 : 1;
             screen(app, TODO);
@@ -612,7 +732,7 @@ static void activate(struct app *app, int code, int64_t now, const struct tm *to
         }
         break;
     case TASK_ACTIONS: task_action(app, code); break;
-    case EDIT_TASK: edit_task(app, code); break;
+    case EDIT_TASK: edit_task(app, code, now); break;
     case CALCULATOR: calculate(app, code); break;
     }
 }
@@ -918,6 +1038,67 @@ static void draw_text_fitted(uint32_t *pixels, unsigned stride, int x, int y, in
         }
         x += advance;
     }
+}
+
+/* Copy text into out, cut with "..." so it fits max_width; tail keeps
+ * the end instead (the task editor shows what was just typed). */
+static void fit_text(char *out, size_t size, const char *text, int max_width, bool tail)
+{
+    size_t length = strlen(text);
+    if (text_width(text) <= max_width || size < 5) {
+        snprintf(out, size, "%s", text);
+        return;
+    }
+    int room = max_width - text_width("..."), used = 0;
+    size_t n = 0;
+    while (n < length && n + 4 < size) {
+        int w = f20_adv[glyph((unsigned char)text[tail ? length - 1 - n : n])];
+        if (used + w > room)
+            break;
+        used += w;
+        ++n;
+    }
+    if (tail)
+        snprintf(out, size, "...%s", text + length - n);
+    else
+        snprintf(out, size, "%.*s...", (int)n, text);
+}
+
+/* Greedy word wrap into at most max_lines lines; a word wider than the
+ * line breaks between letters, and overflow ends the last line in "...".
+ * Returns the line count (at least 1). */
+static int wrap_lines(const char *text, int width, char lines[][TASK_LENGTH + 4], int max_lines)
+{
+    int count = 0;
+    while (count < max_lines) {
+        while (*text == ' ')
+            ++text;
+        size_t n = 0, cut = 0;
+        int used = 0;
+        while (text[n]) {
+            int w = f20_adv[glyph((unsigned char)text[n])];
+            if (used + w > width)
+                break;
+            used += w;
+            if (text[++n - 1] == ' ')
+                cut = n - 1;
+        }
+        if (text[n] && text[n] != ' ' && cut)
+            n = cut;
+        if (!n && text[0])
+            n = 1;
+        snprintf(lines[count++], TASK_LENGTH + 4, "%.*s", (int)n, text);
+        text += n;
+        while (*text == ' ')
+            ++text;
+        if (!*text)
+            return count;
+    }
+    /* More text than lines: mark the cut on the last line. */
+    char last[TASK_LENGTH + 8];
+    snprintf(last, sizeof last, "%s%s", lines[count - 1], text);
+    fit_text(lines[count - 1], TASK_LENGTH + 4, last, width, false);
+    return count;
 }
 
 static void draw_text(uint32_t *pixels, unsigned stride, int x, int y, const char *text, uint32_t color)
@@ -1781,6 +1962,9 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         snprintf(title, sizeof title, "%s", WC_CITIES[app->wc_selected].name);
     else
         snprintf(title, sizeof title, "%s", titles[app->screen]);
+    if (app->screen == EDIT_TASK && app->draft[0])
+        snprintf(title, sizeof title, "New task  %u/%u",
+                 (unsigned)strlen(app->draft) % 1000u, (unsigned)TASK_LENGTH);
     if (SCHEME.caps_bar)
         upper(title);
     centered(pixels, stride, 0, 3, WIDTH, title, INK);
@@ -1826,13 +2010,43 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         if (!app->task_count)
             draw_text(pixels, stride, 18, 44, "No tasks yet", MUTED);
         break;
-    case TASK_ACTIONS:
-        draw_text(pixels, stride, 20, 36, app->tasks[app->task_index].text, INK);
+    case TASK_ACTIONS: {
+        char lines[TASK_LINES][TASK_LENGTH + 4];
+        int count = wrap_lines(app->tasks[app->task_index].text, WIDTH - 40, lines, TASK_LINES);
+        for (int i = 0; i < count; ++i)
+            draw_text(pixels, stride, 20, TASK_TEXT_Y + i * TASK_LINE_H, lines[i], INK);
         break;
-    case EDIT_TASK:
-        fill(pixels, stride, 18, 36, 339, 30, PANEL);
-        draw_text_fitted(pixels, stride, 28, 43, 319, app->draft[0] ? app->draft : "Task name", app->draft[0] ? INK : MUTED);
+    }
+    case EDIT_TASK: {
+        /* The field: long names keep their end, where typing happens, in
+         * view; the caret follows the text, or underlines the letter a
+         * multi-tap can still change. */
+        int pending = t9_pending(app, now);
+        char shown[TASK_LENGTH + 8];
+        fit_text(shown, sizeof shown, app->draft[0] ? app->draft : "Task name", 327, true);
+        fill(pixels, stride, KB_X, 32, WIDTH - 2 * KB_X, 30, PANEL);
+        draw_text_fitted(pixels, stride, 20, 36, 327, shown, app->draft[0] ? INK : MUTED);
+        int caret = 20 + (app->draft[0] ? text_width(shown) : 0);
+        if (pending >= 0 && app->draft[0]) {
+            int w = f20_adv[glyph((unsigned char)shown[strlen(shown) - 1])];
+            fill(pixels, stride, caret - w, 57, w, 2, ACCENT);
+        } else
+            fill(pixels, stride, caret + 1, 36, 2, 22, ACCENT);
+        /* The open key's letters, the one in the text selected. */
+        if (pending >= 0) {
+            char set[8];
+            t9_letters(app, pending, set, sizeof set);
+            for (int i = 0; set[i]; ++i) {
+                char one[2] = {set[i], 0};
+                int x = 20 + i * 26;
+                bool on = i == app->t9_tap;
+                if (on)
+                    paint_selection(pixels, stride, x, 65, 24, 24);
+                centered(pixels, stride, x, 66, 24, one, on ? sel_text_color() : INK);
+            }
+        }
         break;
+    }
     case CALCULATOR:
         fill(pixels, stride, 18, 34, 339, 36, PANEL);
         if (app->op && !app->error) {
@@ -1888,10 +2102,10 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
             /* System list rows: theme selection painter, theme text
              * edge, chevron on the selected row only. */
             paint_list_row(pixels, stride, item, selected);
-            char label[32];
-            snprintf(label, sizeof label, "%s", item->label);
+            char full[sizeof item->label], label[sizeof item->label];
+            snprintf(full, sizeof full, "%s", item->label);
             if (SCHEME.caps_rows)
-                upper(label);
+                upper(full);
             uint32_t color = selected ? sel_text_color() : INK;
             const bool with_icon=app->screen==HOME || app->screen==TIME_GROUP ||
                                  app->screen==TOOL_GROUP;
@@ -1901,6 +2115,12 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
                                menu_icon((enum screen)item->code),color);
                 label_x+=19;
             }
+            /* Task names (up to TASK_LENGTH) end in "..." rather than
+             * squeezing; menu labels keep draw_text_fitted's narrowing. */
+            if (app->screen == TODO)
+                fit_text(label, sizeof label, full, WIDTH - label_x - 40, false);
+            else
+                snprintf(label, sizeof label, "%s", full);
             draw_text_fitted(pixels,stride,label_x,y,
                              WIDTH-label_x-40,label,color);
             if (selected)
@@ -1915,7 +2135,24 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
             uint32_t color=selected?sel_text_color():INK;
             if(selected)
                 paint_selection(pixels,stride,item->x,item->y,item->w,item->h);
-            else if(tool) {
+            else if(app->screen==EDIT_TASK) {
+                /* T9 keys, as Q2's: letter keys light, function keys
+                 * the theme's darker fill, Done the accent. */
+                if(item->code==T9_DONE) {
+                    fill(pixels,stride,item->x,item->y,item->w,item->h,SCHEME.accent_top);
+                    color=0xffffffu;
+                } else if(t9_function(item->code)) {
+                    /* Q2's slate function keys, white-lettered. */
+                    bool light=(BG&0xffu)>0x80u;
+                    fill(pixels,stride,item->x,item->y,item->w,item->h,
+                         light?0x7e8693u:0x3a3d42u);
+                    color=0xffffffu;
+                } else {
+                    fill(pixels,stride,item->x,item->y,item->w,item->h,PANEL);
+                    uint32_t edge=SCHEME.paper==0?0x414141u:0xc6c6c6u;
+                    outline(pixels,stride,item->x,item->y,item->w,item->h,edge);
+                }
+            } else if(tool) {
                 if(item->code==0 || (app->screen==DATE_CALC && item->code==4)) {
                     fill(pixels,stride,item->x,item->y,item->w,item->h,
                          SCHEME.accent_top);

@@ -134,13 +134,57 @@ static void worldclock(void)
     assert(app.screen == HOME);
 }
 
+/* T9 keypad key k: 4x4 from (12, 92), 86x52 keys, 2 px / 3 px apart.
+ * 0 ,  1 abc  2 def  3 DEL / 4 ghi 5 jkl 6 mno 7 ABC /
+ * 8 pqrs 9 tuv 10 wxyz 11 123 / 12 .?! 13 space 14 Done 15 CLR */
+static void key(int k, int64_t now)
+{
+    tap(12 + k % 4 * 88 + 43, 92 + k / 4 * 55 + 26, now);
+}
+
+static void t9(void)
+{
+    tap(50, 138, 0); /* To-do row */
+    tap(50, 250, 0); /* + New task */
+    assert(app.screen == EDIT_TASK && app.focus == 1); /* wheel on abc */
+    key(1, 1000);
+    key(1, 1500);           /* multi-tap: a -> b */
+    assert(!strcmp(app.draft, "b"));
+    key(1, 3000);           /* after the 1.2 s pause: a new letter */
+    assert(!strcmp(app.draft, "ba"));
+    key(2, 3100);           /* another key: a new letter at once */
+    key(2, 3200);
+    key(2, 3300);
+    key(2, 3400);           /* d e f d: wraps round */
+    assert(!strcmp(app.draft, "bad"));
+    key(7, 5000);           /* ABC */
+    key(4, 5100);
+    assert(!strcmp(app.draft, "badG"));
+    key(11, 6000);          /* 123: each press is a new digit */
+    key(4, 6100);
+    key(4, 6200);
+    assert(!strcmp(app.draft, "badG44"));
+    key(13, 7000);          /* space */
+    key(3, 7100);           /* DEL */
+    key(3, 7200);
+    assert(!strcmp(app.draft, "badG4"));
+    key(15, 8000);          /* CLR */
+    assert(!app.draft[0]);
+    key(14, 8100);          /* Done on an empty name keeps the editor */
+    assert(app.screen == EDIT_TASK);
+    back();
+    assert(app.screen == TODO);
+    back();
+}
+
 static void tasks(const char *path)
 {
     tap(50, 138, 0); /* To-do row: y=122..153 */
     tap(50, 250, 0);
     assert(app.screen == EDIT_TASK);
-    tap(25, 105, 0); /* A */
-    tap(295, 250, 0);
+    key(7, 0);  /* ABC */
+    key(1, 0);  /* A */
+    key(14, 0); /* Done */
     assert(app.screen == TODO && app.task_count == 1);
     tap(50, 42, 0); /* task row 0: y=26..57 */
     tap(50, 82, 0);  /* Mark done row: y=66..97 */
@@ -150,6 +194,29 @@ static void tasks(const char *path)
     tap(50, 138, 0);
     tap(50, 42, 0);
     tap(50, 114, 0); /* Delete task row: y=98..129 */
+    app_init(&app, path);
+    assert(app.task_count == 0);
+
+    /* Names hold TASK_LENGTH (140) characters; the 141st is ignored,
+     * and the full name survives a save and reload. */
+    tap(50, 138, 0);
+    tap(50, 250, 0);
+    key(11, 0); /* 123: one "2" per press */
+    for (int i = 0; i <= TASK_LENGTH; ++i)
+        key(1, 0);
+    assert(strlen(app.draft) == TASK_LENGTH);
+    key(14, 0); /* Done */
+    app_init(&app, path);
+    assert(app.task_count == 1 && strlen(app.tasks[0].text) == TASK_LENGTH);
+    /* 140 "2"s (10 px each) wrap onto five 335 px lines, so the options
+     * rows start at y=34+5*22+8=152: Mark done 152..183, Delete 184..215. */
+    tap(50, 138, 0);
+    tap(50, 42, 0);
+    assert(app.screen == TASK_ACTIONS);
+    tap(50, 168, 0);
+    assert(app.tasks[0].done);
+    tap(50, 42, 0);
+    tap(50, 200, 0);
     app_init(&app, path);
     assert(app.task_count == 0);
 }
@@ -302,6 +369,7 @@ int main(void)
     theme();
     wheel();
     stopwatch();
+    t9();
     calendar();
     worldclock();
     tasks(path);
