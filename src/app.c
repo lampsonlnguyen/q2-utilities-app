@@ -344,10 +344,62 @@ static void make_layout(const struct app *app, struct layout *layout)
                       app->screen==RANDOMIZER?TOOL_RANDOM:
                       app->screen==DATE_CALC?TOOL_DATE:
                       app->screen==ENGINEERING?TOOL_ENGINEERING:TOOL_COUNTER;
-        int count=extra_button_count(kind);
-        for(int i=0;i<count;i++)
-            button(layout,15+(i%3)*116,154+(i/3)*45,110,38,i,
-                   extra_button_label(&app->extra,kind,i));
+        /* The compact screen design uses one dominant action and one
+         * short settings strip; the old 3x3 grid made every control
+         * equally prominent on a 375x320 screen.
+         * Order of button() calls is wheel focus order. */
+        const int primary_y=190, secondary_y=250;
+        const int count=extra_button_count(kind);
+        if(kind==TOOL_POMODORO) {
+            for(int i=0;i<3;i++)
+                button(layout,14+i*118,primary_y,110,46,i,
+                       extra_button_label(&app->extra,kind,i));
+            for(int i=3;i<7;i++)
+                button(layout,10+(i-3)*91,secondary_y,83,42,i,
+                       extra_button_label(&app->extra,kind,i));
+        } else if(kind==TOOL_METRONOME) {
+            const int top[]={0,5,6},lower[]={3,1,2,4};
+            for(int i=0;i<3;i++)
+                button(layout,14+i*118,primary_y,110,46,top[i],
+                       extra_button_label(&app->extra,kind,top[i]));
+            for(int i=0;i<4;i++)
+                button(layout,10+i*91,secondary_y,83,42,lower[i],
+                       extra_button_label(&app->extra,kind,lower[i]));
+        } else if(kind==TOOL_COUNTDOWN) {
+            for(int i=0;i<2;i++)
+                button(layout,14+i*178,primary_y,168,46,i,
+                       extra_button_label(&app->extra,kind,i));
+            for(int i=2;i<count;i++)
+                button(layout,10+(i-2)*91,secondary_y,83,42,i,
+                       extra_button_label(&app->extra,kind,i));
+        } else if(kind==TOOL_CONVERTER || kind==TOOL_ENGINEERING) {
+            for(int i=0;i<2;i++)
+                button(layout,14+i*178,primary_y,168,46,i,
+                       extra_button_label(&app->extra,kind,i));
+            for(int i=2;i<count;i++)
+                button(layout,10+(i-2)*91,secondary_y,83,42,i,
+                       extra_button_label(&app->extra,kind,i));
+        } else if(kind==TOOL_RANDOM) {
+            for(int i=0;i<2;i++)
+                button(layout,14+i*178,primary_y,168,46,i,
+                       extra_button_label(&app->extra,kind,i));
+            for(int i=2;i<count;i++)
+                button(layout,10+(i-2)*91,secondary_y,83,42,i,
+                       extra_button_label(&app->extra,kind,i));
+        } else if(kind==TOOL_DATE) {
+            button(layout,14,primary_y,347,46,4,
+                   extra_button_label(&app->extra,kind,4));
+            for(int i=0;i<4;i++)
+                button(layout,10+i*91,secondary_y,83,42,i,
+                       extra_button_label(&app->extra,kind,i));
+        } else if(kind==TOOL_COUNTER) {
+            for(int i=0;i<3;i++)
+                button(layout,14+i*118,primary_y,110,46,i,
+                       extra_button_label(&app->extra,kind,i));
+            for(int i=3;i<count;i++)
+                button(layout,14+(i-3)*178,secondary_y,168,42,i,
+                       extra_button_label(&app->extra,kind,i));
+        }
         break;
     }
     case WORLD_CLOCK: {
