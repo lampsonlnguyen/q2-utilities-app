@@ -83,14 +83,14 @@ static void wheel(void)
     send("w -26", 70); /* 35 units total, exactly four ticks at 160%. */
     assert(app.focus == 4);
     send("w -200", 80);
-    assert(app.focus == 6); /* Pins at the last row. */
+    assert(app.focus == 4); /* Pins at the last visible row. */
 
     app_wheel_config(&app, "[Q2POD]\nWHEELSENSITIVITY=1600\n");
     send("w 27", 90);
     send("w 1", 1090); /* Old residual travel expires. */
-    assert(app.focus == 6);
+    assert(app.focus == 4);
     send("w 27", 1100);
-    assert(app.focus == 5);
+    assert(app.focus == 3);
     send("w 200", 1110);
     assert(app.focus == 0);
 }
