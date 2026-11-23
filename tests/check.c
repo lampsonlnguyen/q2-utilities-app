@@ -122,6 +122,45 @@ static void tasks(const char *path)
     assert(app.task_count == 0);
 }
 
+static void expanded_utilities(void)
+{
+    /* The original five home entries stay in place. Two icon-bearing
+     * categories follow at y=186..217 and y=218..249. */
+    tap(50,203,0);
+    assert(app.screen==TIME_GROUP);
+    tap(50,42,0);
+    assert(app.screen==POMODORO);
+    tap(50,171,1000);
+    assert(app.extra.pomo.running);
+    back();assert(app.screen==TIME_GROUP);
+    tap(50,78,5000);
+    assert(app.screen==METRONOME);
+    tap(50,171,6000);
+    assert(app.extra.metro.running);
+    back();assert(app.screen==TIME_GROUP);
+    tap(50,114,7000);
+    assert(app.screen==COUNTDOWN);
+    tap(50,171,7000);
+    assert(app.extra.countdown.running);
+    back();assert(app.screen==TIME_GROUP);
+    back();assert(app.screen==HOME);
+
+    tap(50,235,8000);
+    assert(app.screen==TOOL_GROUP);
+    static const enum screen types[]={CONVERTER,RANDOMIZER,DATE_CALC,ENGINEERING,EVENT_COUNTER};
+    for(int i=0;i<5;i++) {
+        tap(50,43+i*36,9000+i);
+        assert(app.screen==types[i]);
+        if(app.screen==EVENT_COUNTER) {
+            tap(50,171,10000); /* +1 */
+            assert(app.extra.counter.values[0]==1 && !app.extra.counter.save_error);
+        }
+        back();
+        assert(app.screen==TOOL_GROUP);
+    }
+    back();assert(app.screen==HOME);
+}
+
 static void calculator(void)
 {
     tap(50, 170, 0); /* Calculator row: y=154..185 */
@@ -178,8 +217,12 @@ int main(void)
     calendar();
     worldclock();
     tasks(path);
+    expanded_utilities();
     calculator();
     assert(unlink(path) == 0);
+    char counter_path[160];
+    snprintf(counter_path,sizeof counter_path,"%s/counters.tsv",dir);
+    assert(unlink(counter_path) == 0);
     assert(rmdir(dir) == 0);
     puts("Utilities checks passed");
     return 0;

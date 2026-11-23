@@ -2,6 +2,7 @@
 #include "app.h"
 #include "q2pod_scheme.h"
 #include "worldclock.h"
+#include "utility_icons.h"
 
 #include <errno.h>
 #include <math.h>
@@ -104,7 +105,10 @@ struct layout {
 
 static const char *const titles[] = {
     "Utilities", "Stopwatch", "Calendar", "To-do", "Calculator",
-    "World Clock", "World Clock", "New task", "Task options", "World map"
+    "World Clock", "World Clock", "New task", "Task options", "World map",
+    "Clocks & Timers", "Tools & Calculators", "Pomodoro", "Metronome",
+    "Countdown", "Unit Converter", "Random Generator", "Date Calculator",
+    "Engineering", "Event Counter"
 };
 
 static const char *const months[] = {
@@ -126,6 +130,7 @@ static void screen(struct app *app, enum screen next)
 void app_init(struct app *app, const char *task_path)
 {
     *app = (struct app){ .task_path = task_path, .touch_button = -1, .number = "0" };
+    extra_init(&app->extra, task_path);
     FILE *file = fopen(task_path, "r");
     if (!file) {
         app->load_failed = errno != ENOENT;
@@ -299,9 +304,37 @@ static void make_layout(const struct app *app, struct layout *layout)
         /* q2-pod lists: 32 px full-width rows from below the 26 px bar.
          * World Clock sits after Stopwatch as the Clock grouping; the
          * other tools keep their relative order. */
-        static const enum screen order[] = {STOPWATCH, WORLD_CLOCK, CALENDAR, TODO, CALCULATOR};
+        static const enum screen order[] = {STOPWATCH, WORLD_CLOCK, CALENDAR, TODO, CALCULATOR,
+                                              TIME_GROUP, TOOL_GROUP};
         for (unsigned i = 0; i < sizeof order / sizeof order[0]; ++i)
             button(layout, 0, 26 + (int)i * 32, WIDTH, 32, order[i], titles[order[i]]);
+        break;
+    }
+    case TIME_GROUP: {
+        static const enum screen order[]={POMODORO,METRONOME,COUNTDOWN};
+        for(int i=0;i<3;i++)
+            button(layout,0,26+i*36,WIDTH,36,order[i],titles[order[i]]);
+        break;
+    }
+    case TOOL_GROUP: {
+        static const enum screen order[]={CONVERTER,RANDOMIZER,DATE_CALC,ENGINEERING,EVENT_COUNTER};
+        for(int i=0;i<5;i++)
+            button(layout,0,26+i*36,WIDTH,36,order[i],titles[order[i]]);
+        break;
+    }
+    case POMODORO: case METRONOME: case COUNTDOWN: case CONVERTER:
+    case RANDOMIZER: case DATE_CALC: case ENGINEERING: case EVENT_COUNTER: {
+        ToolKind kind=app->screen==POMODORO?TOOL_POMODORO:
+                      app->screen==METRONOME?TOOL_METRONOME:
+                      app->screen==COUNTDOWN?TOOL_COUNTDOWN:
+                      app->screen==CONVERTER?TOOL_CONVERTER:
+                      app->screen==RANDOMIZER?TOOL_RANDOM:
+                      app->screen==DATE_CALC?TOOL_DATE:
+                      app->screen==ENGINEERING?TOOL_ENGINEERING:TOOL_COUNTER;
+        int count=extra_button_count(kind);
+        for(int i=0;i<count;i++)
+            button(layout,15+(i%3)*116,154+(i/3)*45,110,38,i,
+                   extra_button_label(&app->extra,kind,i));
         break;
     }
     case WORLD_CLOCK: {
@@ -439,6 +472,30 @@ static void activate(struct app *app, int code, int64_t now, const struct tm *to
         if (code == CALENDAR)
             set_today(app, today);
         break;
+    case TIME_GROUP:
+    case TOOL_GROUP:
+        screen(app,(enum screen)code);
+        extra_enter(&app->extra,
+            code==POMODORO?TOOL_POMODORO:
+            code==METRONOME?TOOL_METRONOME:
+            code==COUNTDOWN?TOOL_COUNTDOWN:
+            code==CONVERTER?TOOL_CONVERTER:
+            code==RANDOMIZER?TOOL_RANDOM:
+            code==DATE_CALC?TOOL_DATE:
+            code==ENGINEERING?TOOL_ENGINEERING:TOOL_COUNTER,now);
+        break;
+    case POMODORO: case METRONOME: case COUNTDOWN: case CONVERTER:
+    case RANDOMIZER: case DATE_CALC: case ENGINEERING: case EVENT_COUNTER: {
+        ToolKind kind=app->screen==POMODORO?TOOL_POMODORO:
+                      app->screen==METRONOME?TOOL_METRONOME:
+                      app->screen==COUNTDOWN?TOOL_COUNTDOWN:
+                      app->screen==CONVERTER?TOOL_CONVERTER:
+                      app->screen==RANDOMIZER?TOOL_RANDOM:
+                      app->screen==DATE_CALC?TOOL_DATE:
+                      app->screen==ENGINEERING?TOOL_ENGINEERING:TOOL_COUNTER;
+        extra_action(&app->extra,kind,code,now,today);
+        break;
+    }
     case STOPWATCH:
         if (code == 0) {
             app->elapsed = elapsed(app, now);
@@ -677,6 +734,13 @@ void app_input(struct app *app, const char *message, int64_t now, const struct t
                                   : 0;
             } else if (app->screen == EDIT_TASK || app->screen == TASK_ACTIONS)
                 screen(app, TODO);
+            else if (app->screen == POMODORO || app->screen == METRONOME ||
+                     app->screen == COUNTDOWN)
+                screen(app,TIME_GROUP);
+            else if (app->screen == CONVERTER || app->screen == RANDOMIZER ||
+                     app->screen == DATE_CALC || app->screen == ENGINEERING ||
+                     app->screen == EVENT_COUNTER)
+                screen(app,TOOL_GROUP);
             else
                 screen(app, HOME);
         }
@@ -697,6 +761,39 @@ static void fill(uint32_t *pixels, unsigned stride, int x, int y, int w, int h, 
     }
 }
 
+/* Twelve-pixel icon font: only 360 bytes of immutable monochrome masks. */
+static void draw_font_icon(uint32_t *pixels,unsigned stride,int x,int y,
+                           UtilityIcon icon,uint32_t color)
+{
+    if(icon<0||icon>=ICON_COUNT)return;
+    for(int row=0;row<12;row++) {
+        const uint16_t bits=icon_font_12x12[icon][row];
+        for(int col=0;col<12;col++)
+            if(bits & (1u<<(11-col)))
+                fill(pixels,stride,x+col,y+row,1,1,color);
+    }
+}
+static UtilityIcon menu_icon(enum screen item)
+{
+    switch(item) {
+    case STOPWATCH:return ICON_STOPWATCH;
+    case WORLD_CLOCK:return ICON_WORLD;
+    case CALENDAR:return ICON_CALENDAR;
+    case TODO:return ICON_TODO;
+    case CALCULATOR:return ICON_CALC;
+    case TIME_GROUP:return ICON_TIMERS;
+    case TOOL_GROUP:return ICON_TOOLS;
+    case POMODORO:return ICON_POMO;
+    case METRONOME:return ICON_METRO;
+    case COUNTDOWN:return ICON_COUNTDOWN;
+    case CONVERTER:return ICON_CONVERTER;
+    case RANDOMIZER:return ICON_RANDOM;
+    case DATE_CALC:return ICON_DATE;
+    case ENGINEERING:return ICON_ENGINEERING;
+    case EVENT_COUNTER:return ICON_COUNTER;
+    default:return ICON_TOOLS;
+    }
+}
 static int glyph(unsigned char c)
 {
     return c >= 32 && c <= 126 ? c - 32 : '?' - 32;
@@ -1229,6 +1326,7 @@ static void draw_world_clock_detail(struct app *app, uint32_t *pixels, unsigned 
 
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, time_t utc, const struct tm *today)
 {
+    extra_tick(&app->extra,now);
     struct layout layout;
     make_layout(app, &layout);
     fill(pixels, stride, 0, 0, WIDTH, HEIGHT, BG);
@@ -1253,6 +1351,30 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
     char value[64];
 
     switch (app->screen) {
+    case POMODORO: case METRONOME: case COUNTDOWN: case CONVERTER:
+    case RANDOMIZER: case DATE_CALC: case ENGINEERING: case EVENT_COUNTER: {
+        ToolKind kind=app->screen==POMODORO?TOOL_POMODORO:
+                      app->screen==METRONOME?TOOL_METRONOME:
+                      app->screen==COUNTDOWN?TOOL_COUNTDOWN:
+                      app->screen==CONVERTER?TOOL_CONVERTER:
+                      app->screen==RANDOMIZER?TOOL_RANDOM:
+                      app->screen==DATE_CALC?TOOL_DATE:
+                      app->screen==ENGINEERING?TOOL_ENGINEERING:TOOL_COUNTER;
+        char first[96],second[96],third[96];
+        extra_display(&app->extra,kind,now,today,first,sizeof first,
+                      second,sizeof second,third,sizeof third);
+        draw_text_fitted(pixels,stride,20,51,335,first,ACCENT);
+        draw_text_fitted(pixels,stride,20,85,335,second,INK);
+        draw_text_fitted(pixels,stride,20,119,335,third,MUTED);
+        if(kind==TOOL_METRONOME && app->extra.metro.running) {
+            int beat=(int)(((uint64_t)(now-app->extra.metro.start_ms)*
+                            (unsigned)app->extra.metro.bpm/60000u)%
+                            (unsigned)app->extra.metro.beats_per_bar);
+            for(int i=0;i<app->extra.metro.beats_per_bar;i++)
+                fill(pixels,stride,50+i*46,141,28,6,i==beat?ACCENT:PANEL);
+        }
+        break;
+    }
     case STOPWATCH:
         format_elapsed(value, sizeof value, elapsed(app, now));
         centered(pixels, stride, 18, 78, 339, value, ACCENT);
@@ -1312,7 +1434,7 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
     case WC_DETAIL:
         draw_world_clock_detail(app, pixels, stride, utc);
         break;
-    case HOME:
+    case HOME: case TIME_GROUP: case TOOL_GROUP:
         break;
     }
 
@@ -1325,7 +1447,8 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         const struct button *item = &layout.items[i];
         bool selected = i == app->focus;
         int y = item->y + (item->h - F20_H) / 2;
-        bool list = app->screen == HOME || app->screen == TASK_ACTIONS ||
+        bool list = app->screen == HOME || app->screen == TIME_GROUP ||
+                    app->screen == TOOL_GROUP || app->screen == TASK_ACTIONS ||
                     (app->screen == TODO && item->code >= 0);
         if (list) {
             /* System list rows: theme selection painter, theme text
@@ -1336,8 +1459,16 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
             if (SCHEME.caps_rows)
                 upper(label);
             uint32_t color = selected ? sel_text_color() : INK;
-            draw_text_fitted(pixels, stride, SCHEME.text_x, y,
-                             WIDTH - SCHEME.text_x - 40, label, color);
+            const bool with_icon=app->screen==HOME || app->screen==TIME_GROUP ||
+                                 app->screen==TOOL_GROUP;
+            int label_x=SCHEME.text_x;
+            if(with_icon) {
+                draw_font_icon(pixels,stride,label_x,y+2,
+                               menu_icon((enum screen)item->code),color);
+                label_x+=19;
+            }
+            draw_text_fitted(pixels,stride,label_x,y,
+                             WIDTH-label_x-40,label,color);
             if (selected)
                 draw_text(pixels, stride, 322, y, ">",
                           SCHEME.painter == Q2POD_SEL_CARD ? SCHEME.chevron

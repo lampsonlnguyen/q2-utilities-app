@@ -9,6 +9,39 @@ A full-screen utility card app for the Shanling Q2 running [Q2 Pod](https://gith
 | Calendar | Browse months, highlight the player's current date, and jump back with **Today**. The date comes from the Q2 clock. |
 | To-do | Add, complete, reopen, and delete up to 32 tasks. Use the on-screen keyboard for names up to 24 characters. Tasks are saved in `.utilities-app/tasks.tsv` on the SD card. |
 | Calculator | Add, subtract, multiply, and divide with decimal input. Operations are evaluated in entry order. **C** clears the calculator and **<** erases the last digit. |
+| Pomodoro | Adjustable work/break intervals, session count, monotonic running/paused countdown. |
+| Metronome | **Visual** pulse at 30–300 BPM, tap tempo, and 3/4, 4/4 or 6/8 display. Sound is not yet integrated: the card app must not seize the Q2 music audio device. |
+| Unit Converter | Offline km/mi, kg/lb, Celsius/Fahrenheit, km/h/mph, cm/in, and MiB/MB conversions, with adjustable inputs and swap. |
+| Random Generator | Random integer in adjustable range, six-sided die and coin flip. Not suitable for security/cryptography. |
+| Countdown Timer | Editable timer, start/pause/reset, minute and 10-second increments. |
+| Date Calculator | Add/subtract days from the Q2's local date, correctly handling leap years. |
+| Engineering Calculator | Ohm's law (V, P from R/I), voltage divider, and ideal battery life; editable parameters. |
+| Event Counter | Four independent tally channels, increment/decrement/reset, saved atomically to `.utilities-app/counters.tsv` on SD. |
+
+## New tools and navigation
+
+The home screen preserves the original five tools, followed by **Clocks & Timers**
+(Pomodoro, Metronome, Countdown) and **Tools & Calculators** (Unit Converter,
+Random Generator, Date Calculator, Engineering Calculator, Event Counter).
+The home screen and both submenus have tiny 12×12 bitmap-font icons: glyphs
+are compiled into the executable and inherit the selected Q2 theme's colors
+in all Minimal, Modern, and Classic variants. No PNG or font files are needed.
+Turn the Q2 wheel to select an item or action, press Centre, or tap an item.
+Return goes back one level. The new screens never ask for a keyboard.
+
+**Timer and metronome scope:** while Utilities is open, Pomodoro and Countdown
+use the Q2 monotonic clock (not frame counting); leaving their screens does
+not stop them. They do not continue after the Q2 firmware terminates the app;
+enable Q2 Pod Smart Awake for sessions longer than the firmware's idle limit.
+The metronome is currently *visual only*. It deliberately does not open the
+audio device or compete with Q2 Pod music playback; an audible beat requires
+a verified system-level audio/mixing interface.
+
+The date calculator is based on the Q2's *local date*. Conversion and
+engineering calculators use approximate decimal values. Event Counter is
+saved after every increment/decrement/reset; a storage failure is shown in
+the counter screen. To preserve counters during upgrades, keep
+`.utilities-app/counters.tsv`.
 
 ## World Clock
 
