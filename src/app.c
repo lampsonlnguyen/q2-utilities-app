@@ -1715,7 +1715,7 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
             if(selected)
                 paint_selection(pixels,stride,item->x,item->y,item->w,item->h);
             else if(tool) {
-                if(item->code==0) {
+                if(item->code==0 || (app->screen==DATE_CALC && item->code==4)) {
                     fill(pixels,stride,item->x,item->y,item->w,item->h,
                          SCHEME.accent_top);
                     color=0xffffffu;
