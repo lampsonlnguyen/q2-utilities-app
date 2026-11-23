@@ -37,10 +37,19 @@ struct wc_city {
     const char *zone; /* IANA name, for documentation only */
     int base_min;     /* Standard-time offset from UTC, minutes */
     const struct wc_rule *dst; /* NULL: no daylight saving */
+    /* Map picker: position for the tiny world map, country and the
+     * abbreviations the Ubuntu-style tooltip shows ("PDT (UTC-07)"). */
+    double lat, lon;
+    const char *country;
+    const char *abbr_std, *abbr_dst; /* abbr_dst NULL: no daylight saving */
 };
 
 extern const struct wc_city WC_CITIES[];
 extern const int WC_CITY_COUNT;
+/* City indices in WC_CITIES, west to east by longitude: the order the
+ * map picker's wheel steps through, so the pin travels across the map. */
+extern const int WC_MAP_ORDER[];
+extern const int WC_MAP_COUNT;
 
 /* Days since 1970-01-01 (Howard Hinnant's civil algorithm) and back. */
 int64_t wc_days_from_civil(int year, unsigned month, unsigned day);
@@ -58,5 +67,13 @@ bool wc_is_dst(const struct wc_city *city, int64_t utc_seconds);
 void wc_local_time(const struct wc_city *city, int64_t utc_seconds,
                    int *year, int *month, int *mday, int *hour, int *min,
                    int *sec, int *wday);
+
+/* Map picker: the city nearest a tapped longitude/latitude (longitude
+ * wraps at the date line), and the city whose longitude is nearest
+ * (for taps on the GMT strip below the map). */
+const struct wc_city *wc_nearest_city(double lon, double lat);
+const struct wc_city *wc_nearest_longitude(double lon);
+/* Position of a city in WC_MAP_ORDER (0 = westernmost), or 0. */
+int wc_map_position(const struct wc_city *city);
 
 #endif

@@ -83,14 +83,14 @@ static void wheel(void)
     send("w -26", 70); /* 35 units total, exactly four ticks at 160%. */
     assert(app.focus == 4);
     send("w -200", 80);
-    assert(app.focus == 4); /* Pins at the last row. */
+    assert(app.focus == 6); /* Pins at the last row. */
 
     app_wheel_config(&app, "[Q2POD]\nWHEELSENSITIVITY=1600\n");
     send("w 27", 90);
     send("w 1", 1090); /* Old residual travel expires. */
-    assert(app.focus == 4);
+    assert(app.focus == 6);
     send("w 27", 1100);
-    assert(app.focus == 3);
+    assert(app.focus == 5);
     send("w 200", 1110);
     assert(app.focus == 0);
 }
@@ -103,16 +103,33 @@ static void worldclock(void)
     app_theme("[IPOD]\nTHEME=1\nCLASSIC_LIGHT_ACCENT=0\nLIGHT=1\n", 12);
     app_draw(&app, pixels, HEIGHT, 0, UTC, &today);
     assert(pixels[20 * HEIGHT + HEIGHT - 1 - 26] == 0xff94c7de);
-    send("w -196", 0);
-    send("w -84", 10); /* 10 steps down the 16-city list. */
+    send("w -280", 0); /* 10 steps down the 16-city list */
     assert(app.focus == 10 && app.wc_top == 6);
-    send("w 196", 20);
-    send("w 84", 30);
+    send("w 280", 0);
     assert(app.focus == 0 && app.wc_top == 0);
     tap(50, 42, 0); /* first city row -> detail (Los Angeles) */
     assert(app.screen == WC_DETAIL && app.wc_selected == 0);
     back(); /* -> WORLD_CLOCK */
     assert(app.screen == WORLD_CLOCK);
+    /* World map footer button: y=286..319. Opens on Los Angeles. */
+    tap(187, 303, 0);
+    assert(app.screen == WC_MAP && app.wc_map == 1);
+    send("w -28", 0); /* one city east in longitude order: LAX -> DEN */
+    assert(app.wc_map == 2);
+    tap(328, 88, 0); /* Tokyo on the map: lon 139.7, lat 35.7 */
+    assert(app.wc_map == 13);
+    /* The wheel walks every time zone: 2 more east to Auckland, a full
+     * sweep west end to end to Honolulu, and back east to Tokyo. */
+    send("w -56", 0);
+    assert(app.wc_map == 15);
+    send("w 420", 0);
+    assert(app.wc_map == 0);
+    send("w -364", 0);
+    assert(app.wc_map == 13);
+    send("k u 218", 0); /* Centre -> Tokyo detail */
+    assert(app.screen == WC_DETAIL && app.wc_selected == 13);
+    back(); /* -> WORLD_CLOCK, focused on Tokyo */
+    assert(app.screen == WORLD_CLOCK && app.focus == 13);
     back(); /* -> HOME */
     assert(app.screen == HOME);
 }
@@ -135,6 +152,45 @@ static void tasks(const char *path)
     tap(50, 114, 0); /* Delete task row: y=98..129 */
     app_init(&app, path);
     assert(app.task_count == 0);
+}
+
+static void expanded_utilities(void)
+{
+    /* The original five home entries stay in place. Two icon-bearing
+     * categories follow at y=186..217 and y=218..249. */
+    tap(50,203,0);
+    assert(app.screen==TIME_GROUP);
+    tap(50,42,0);
+    assert(app.screen==POMODORO);
+    tap(50,171,1000);
+    assert(app.extra.pomo.running);
+    back();assert(app.screen==TIME_GROUP);
+    tap(50,78,5000);
+    assert(app.screen==METRONOME);
+    tap(50,171,6000);
+    assert(app.extra.metro.running);
+    back();assert(app.screen==TIME_GROUP);
+    tap(50,114,7000);
+    assert(app.screen==COUNTDOWN);
+    tap(50,171,7000);
+    assert(app.extra.countdown.running);
+    back();assert(app.screen==TIME_GROUP);
+    back();assert(app.screen==HOME);
+
+    tap(50,235,8000);
+    assert(app.screen==TOOL_GROUP);
+    static const enum screen types[]={CONVERTER,RANDOMIZER,DATE_CALC,ENGINEERING,EVENT_COUNTER};
+    for(int i=0;i<5;i++) {
+        tap(50,43+i*36,9000+i);
+        assert(app.screen==types[i]);
+        if(app.screen==EVENT_COUNTER) {
+            tap(50,171,10000); /* +1 */
+            assert(app.extra.counter.values[0]==1 && !app.extra.counter.save_error);
+        }
+        back();
+        assert(app.screen==TOOL_GROUP);
+    }
+    back();assert(app.screen==HOME);
 }
 
 static void calculator(void)
@@ -194,8 +250,12 @@ int main(void)
     calendar();
     worldclock();
     tasks(path);
+    expanded_utilities();
     calculator();
     assert(unlink(path) == 0);
+    char counter_path[160];
+    snprintf(counter_path,sizeof counter_path,"%s/counters.tsv",dir);
+    assert(unlink(counter_path) == 0);
     assert(rmdir(dir) == 0);
     puts("Utilities checks passed");
     return 0;

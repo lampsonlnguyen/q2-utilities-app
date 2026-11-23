@@ -138,8 +138,20 @@ int main(void)
         }
         if (!can_pan)
             app_draw(&app, memory + visible * stride, stride, now, date, &today);
-        int timeout = app.screen == STOPWATCH && app.running ? 100 :
-                      1000;
+        int timeout = app.screen == STOPWATCH && app.running ? 100 : 1000;
+        if (app.screen == METRONOME && app.extra.metro.running) {
+            /* Redraw on beat boundaries rather than refreshing the entire
+             * LCD 20-30 times/s. The rational BPM math prevents long-term
+             * drift at tempos which do not divide 60,000 evenly. */
+            int64_t elapsed = now - app.extra.metro.start_ms;
+            if (elapsed >= 0) {
+                int bpm = app.extra.metro.bpm;
+                int64_t beat = elapsed * bpm / 60000;
+                int64_t next = ((beat + 1) * 60000 + bpm - 1) / bpm - elapsed;
+                timeout = (int)(next < 1 ? 1 : next > 1000 ? 1000 : next);
+            } else
+                timeout = 10;
+        }
         struct pollfd poll_input = {.fd = sock, .events = POLLIN};
         int events = poll(&poll_input, 1, timeout);
         if (events < 0 && errno != EINTR)
