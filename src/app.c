@@ -1436,6 +1436,48 @@ static void large_centered(uint32_t *pixels,unsigned stride,int y,
         x+=advance*scale;
     }
 }
+/* Secondary copy uses 15px raster glyphs generated from the existing
+ * anti-aliased font, instead of squeezing 20px labels horizontally. */
+static int small_text_width(const char *label)
+{
+    int total=0;
+    for(const unsigned char *ch=(const unsigned char *)label;*ch;ch++)
+        total+=(f20_adv[glyph(*ch)]*3+2)/4;
+    return total;
+}
+static void small_line(uint32_t *pixels,unsigned stride,int x,int y,
+                       int width,const char *label,uint32_t color)
+{
+    int tw=small_text_width(label);
+    if(tw<width)x+=(width-tw)/2;
+    int xmax=x+(tw<width?tw:width);
+    for(const unsigned char *ch=(const unsigned char *)label;*ch;ch++) {
+        int index=glyph(*ch);
+        int source_w=f20_adv[index],out_w=(source_w*3+2)/4;
+        const unsigned char *bitmap=f20_px+f20_off[index];
+        if(x+out_w>xmax)break;
+        for(int r=0;r<(F20_H*3+2)/4;r++) {
+            int src_r=(r*4+1)/3;
+            if(src_r>=F20_H)src_r=F20_H-1;
+            for(int c=0;c<out_w;c++) {
+                int src_c=(c*4+1)/3;
+                if(src_c>=source_w)src_c=source_w-1;
+                unsigned alpha=bitmap[src_r*source_w+src_c];
+                if(alpha) {
+                    uint32_t *p=&pixels[(x+c)*stride+(HEIGHT-1-y-r)];
+                    *p=0xff000000u|(alpha==255?color:blend(*p,color,alpha));
+                }
+            }
+        }
+        x+=out_w;
+    }
+}
+static void small_centered(uint32_t *pixels,unsigned stride,int y,
+                           const char *label,uint32_t color)
+{
+    small_line(pixels,stride,12,y,WIDTH-24,label,color);
+}
+
 static int64_t tool_remaining(int64_t due,int64_t cached,int64_t now,bool running)
 {
     if(!running)return cached;
@@ -1466,25 +1508,25 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
     switch(kind) {
     case TOOL_POMODORO: {
         const PomodoroState *p=&app->extra.pomo;
-        centered(pixels,stride,0,35,WIDTH,p->phase?"SHORT BREAK":"FOCUS SESSION",MUTED);
+        small_centered(pixels,stride,37,p->phase?"SHORT BREAK":"FOCUS SESSION",MUTED);
         const char *short_time=(a[0]=='0'&&a[1]=='0'&&a[2]==':')?a+3:a;
         large_centered(pixels,stride,68,short_time,2,ACCENT);
-        centered(pixels,stride,0,124,WIDTH,p->running?"IN PROGRESS":"READY / PAUSED",INK);
+        small_centered(pixels,stride,126,p->running?"IN PROGRESS":"READY / PAUSED",INK);
         int64_t rem=tool_remaining(p->due_ms,p->remaining_ms,now,p->running);
         int64_t total=(int64_t)(p->phase?p->break_minutes:p->work_minutes)*60000;
         progress_bar(pixels,stride,rem,total);
         char line[64];
         snprintf(line,sizeof line,"FOCUS %dm  /  REST %dm  /  %d SESSIONS",
                  p->work_minutes,p->break_minutes,p->sessions);
-        draw_text_fitted(pixels,stride,28,163,WIDTH-56,line,MUTED);
+        small_centered(pixels,stride,166,line,MUTED);
         break;
     }
     case TOOL_METRONOME: {
         const MetronomeState *m=&app->extra.metro;
-        centered(pixels,stride,0,36,WIDTH,"TEMPO",MUTED);
+        small_centered(pixels,stride,37,"TEMPO",MUTED);
         char tempo[24];snprintf(tempo,sizeof tempo,"%d",m->bpm);
         large_centered(pixels,stride,66,tempo,2,ACCENT);
-        centered(pixels,stride,0,115,WIDTH,"BEATS PER MINUTE",MUTED);
+        small_centered(pixels,stride,117,"BEATS PER MINUTE",MUTED);
         const int count=m->beats_per_bar;
         int beat=0;
         if(m->running && now>=m->start_ms)
@@ -1494,56 +1536,56 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
         for(int i=0;i<count;i++)
             fill(pixels,stride,(WIDTH-groupw)/2+i*(dotw+gap),146,
                  dotw,15,(m->running && beat==i)?ACCENT:SCHEME.fill);
-        centered(pixels,stride,0,166,WIDTH,
-                 m->running?"VISUAL BEAT ACTIVE":"VISUAL ONLY  /  PRESS START",MUTED);
+        small_centered(pixels,stride,168,
+                 m->running?"VISUAL BEAT ACTIVE":"VISUAL ONLY / PRESS START",MUTED);
         break;
     }
     case TOOL_COUNTDOWN: {
         const CountdownState *t=&app->extra.countdown;
-        centered(pixels,stride,0,35,WIDTH,"COUNTDOWN",MUTED);
+        small_centered(pixels,stride,37,"COUNTDOWN",MUTED);
         const char *short_time=(a[0]=='0'&&a[1]=='0'&&a[2]==':')?a+3:a;
         large_centered(pixels,stride,68,short_time,2,ACCENT);
-        centered(pixels,stride,0,124,WIDTH,
+        small_centered(pixels,stride,126,
                  t->running?"RUNNING":t->remaining_ms==0?"TIME ELAPSED":"READY / PAUSED",INK);
         progress_bar(pixels,stride,
                      tool_remaining(t->due_ms,t->remaining_ms,now,t->running),
                      t->preset_ms);
-        centered(pixels,stride,0,163,WIDTH,"ADJUST DURATION BELOW",MUTED);
+        small_centered(pixels,stride,165,"ADJUST DURATION BELOW",MUTED);
         break;
     }
     case TOOL_CONVERTER: {
-        centered(pixels,stride,0,31,WIDTH,"FROM",MUTED);
+        small_centered(pixels,stride,34,"FROM",MUTED);
         large_centered(pixels,stride,53,a,2,INK);
         fill(pixels,stride,32,102,WIDTH-64,2,SCHEME.fill);
-        centered(pixels,stride,0,110,WIDTH,"CONVERTED VALUE",MUTED);
+        small_centered(pixels,stride,112,"CONVERTED VALUE",MUTED);
         const char *converted=(b[0]=='=' && b[1]==' ')?b+2:b;
         large_centered(pixels,stride,135,converted,2,ACCENT);
         break;
     }
     case TOOL_RANDOM: {
-        centered(pixels,stride,0,35,WIDTH,b,MUTED);
+        small_centered(pixels,stride,37,b,MUTED);
         if(app->extra.random.result==0 && app->extra.random.kind==0)
             large_centered(pixels,stride,71,"--",2,ACCENT);
         else
             large_centered(pixels,stride,71,a,2,ACCENT);
-        centered(pixels,stride,0,132,WIDTH,c,MUTED);
+        small_centered(pixels,stride,136,c,MUTED);
         fill(pixels,stride,32,166,WIDTH-64,2,SCHEME.fill);
         break;
     }
     case TOOL_DATE: {
-        centered(pixels,stride,0,35,WIDTH,"CALCULATED DATE",MUTED);
+        small_centered(pixels,stride,37,"CALCULATED DATE",MUTED);
         large_centered(pixels,stride,71,a,2,ACCENT);
         centered(pixels,stride,0,127,WIDTH,b,INK);
-        centered(pixels,stride,0,162,WIDTH,"BASED ON Q2 LOCAL DATE",MUTED);
+        small_centered(pixels,stride,164,"BASED ON Q2 LOCAL DATE",MUTED);
         break;
     }
     case TOOL_ENGINEERING: {
-        centered(pixels,stride,0,33,WIDTH,
+        small_centered(pixels,stride,36,
                  app->extra.engineering.mode==0?"OHM'S LAW":
                  app->extra.engineering.mode==1?"VOLTAGE DIVIDER":"BATTERY ESTIMATE",MUTED);
         large_centered(pixels,stride,64,a,2,ACCENT);
         draw_text_fitted(pixels,stride,22,124,WIDTH-44,b,INK);
-        draw_text_fitted(pixels,stride,22,161,WIDTH-44,c,MUTED);
+        small_centered(pixels,stride,163,c,MUTED);
         break;
     }
     case TOOL_COUNTER: {
@@ -1551,7 +1593,7 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
         char name[32],number[28];
         snprintf(name,sizeof name,"COUNTER %c",'A'+e->selected);
         snprintf(number,sizeof number,"%d",e->values[e->selected]);
-        centered(pixels,stride,0,35,WIDTH,
+        small_centered(pixels,stride,38,
                  e->save_error?"SD CARD WRITE FAILED":name,
                  e->save_error?SCHEME.accent_red:MUTED);
         large_centered(pixels,stride,66,number,2,ACCENT);
@@ -1730,8 +1772,13 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
              * secondary strips. Fit those labels without clipping. */
             int label_x=item->x+(item->w-text_width(item->label))/2;
             if(label_x<item->x+4)label_x=item->x+4;
-            draw_text_fitted(pixels,stride,label_x,y,
-                             item->w-(label_x-item->x)-4,item->label,color);
+            if(tool && item->y>=250)
+                small_line(pixels,stride,item->x+3,
+                           item->y+(item->h-15)/2,item->w-6,
+                           item->label,color);
+            else
+                draw_text_fitted(pixels,stride,label_x,y,
+                                 item->w-(label_x-item->x)-4,item->label,color);
         }
     }
 }
