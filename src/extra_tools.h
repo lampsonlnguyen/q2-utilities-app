@@ -25,7 +25,7 @@ typedef struct {
 } MetronomeState;
 
 typedef struct {
-    int64_t due_ms, remaining_ms;
+    int64_t due_ms, remaining_ms, preset_ms;
     bool running;
 } CountdownState;
 
