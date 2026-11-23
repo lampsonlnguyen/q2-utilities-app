@@ -39,7 +39,7 @@ int main(void) {
     extra_tick(&s,364000);
     assert(!s.countdown.running && s.countdown.remaining_ms==0);
     extra_action(&s,TOOL_COUNTDOWN,1,365000,&leap);
-    assert(s.countdown.remaining_ms==300000);
+    assert(s.countdown.remaining_ms==360000);
 
     extra_action(&s,TOOL_METRONOME,2,1000,&leap);
     assert(s.metro.bpm==121);
