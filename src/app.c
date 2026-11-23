@@ -1909,7 +1909,8 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         } else {
             /* Dedicated tool controls: a clear primary action and calm
              * secondary keys, preserving Q2 Pod's selection painter. */
-            bool tool=app->screen>=POMODORO && app->screen<=EVENT_COUNTER &&\n                      app->screen!=METRONOME; /* Preserve PR #9 controls. */
+            bool tool=app->screen>=POMODORO && app->screen<=EVENT_COUNTER &&
+                      app->screen!=METRONOME; /* Preserve PR #9 controls. */
             uint32_t color=selected?sel_text_color():INK;
             if(selected)
                 paint_selection(pixels,stride,item->x,item->y,item->w,item->h);
