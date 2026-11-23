@@ -48,6 +48,7 @@ void extra_init(ExtraTools *s, const char *task_path) {
     s->metro.bpm=120;
     s->metro.beats_per_bar=4;
     s->countdown.remaining_ms=5*MINUTE_MS;
+    s->countdown.preset_ms=5*MINUTE_MS;
     s->converter.input=10;
     s->random.seed=(uint32_t)time(NULL)^0x9e3779b9u;
     if(!s->random.seed)s->random.seed=1;
@@ -180,11 +181,12 @@ static void countdown_action(CountdownState *s,int code,int64_t now) {
         if(s->running){s->remaining_ms=left_ms(s->due_ms,now);s->running=false;}
         else if(s->remaining_ms>0){s->due_ms=now+s->remaining_ms;s->running=true;}
     }
-    if(code==1) {s->running=false;s->remaining_ms=5*MINUTE_MS;}
+    if(code==1) {s->running=false;s->remaining_ms=s->preset_ms;}
     if(code>=2 && code<=5 && !s->running) {
         int64_t delta=code==2?-MINUTE_MS:code==3?MINUTE_MS:
                       code==4?-10000:10000;
         s->remaining_ms=bounded_ms(s->remaining_ms+delta);
+        s->preset_ms=s->remaining_ms;
     }
 }
 static void converter_action(ConverterState *s,int code) {
@@ -195,7 +197,8 @@ static void converter_action(ConverterState *s,int code) {
         s->input+=delta;
         if(s->kind!=2 && s->input<0)s->input=0;
         if(s->input>1000000)s->input=1000000;
-        if(s->input< -273.15)s->input= -273.15;
+        if(s->kind==2 && s->input<(s->reverse?-459.67:-273.15))
+            s->input=s->reverse?-459.67:-273.15;
     }
 }
 static void random_action(RandomState *s,int code) {
