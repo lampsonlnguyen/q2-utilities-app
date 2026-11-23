@@ -10,7 +10,7 @@ A full-screen utility card app for the Shanling Q2 running [Q2 Pod](https://gith
 | To-do | Add, complete, reopen, and delete up to 32 tasks. Use the on-screen keyboard for names up to 24 characters. Tasks are saved in `.utilities-app/tasks.tsv` on the SD card. |
 | Calculator | Add, subtract, multiply, and divide with decimal input. Operations are evaluated in entry order. **C** clears the calculator and **<** erases the last digit. |
 | Pomodoro | Adjustable work/break intervals, session count, monotonic running/paused countdown. |
-| Metronome | **Visual** pulse at 30–300 BPM, tap tempo, and 3/4, 4/4 or 6/8 display. Sound is not yet integrated: the card app must not seize the Q2 music audio device. |
+| Metronome | Classic Wittner-style pyramid with a swinging pendulum (visual beat) at 30–300 BPM, tap tempo, and 3/4, 4/4 or 6/8 display. The pendulum's sliding weight sits on the 40–208 BPM tempo scale on the face. Sound is not yet integrated: the card app must not seize the Q2 music audio device. |
 | Unit Converter | Offline km/mi, kg/lb, Celsius/Fahrenheit, km/h/mph, cm/in, and MiB/MB conversions, with adjustable inputs and swap. |
 | Random Generator | Random integer in adjustable range, six-sided die and coin flip. Not suitable for security/cryptography. |
 | Countdown Timer | Editable timer, start/pause/reset, minute and 10-second increments. |

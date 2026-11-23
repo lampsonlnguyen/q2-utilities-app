@@ -31,8 +31,8 @@ Screen parts at 375x320:
 - System-theme title bar: y=0..25 (unchanged).
 - Glanceable information/hero: y=28..185. Large, single readout and
   mode/status; a bounded progress bar or four counter channels where useful.
-- Primary controls: y=190..235, a 46px-tall action row.
-- Secondary controls: y=250..291, a 42px-tall adjustment row.
+- Primary controls: y=190..235, a 46px-tall action row (except Metronome).
+- Secondary controls: y=250..291, a 42px-tall adjustment row (except Metronome).\n- Metronome retains PR #9's classic swinging-pendulum pyramid at y=54..198,\n  with a dedicated compact button grid at y=226..318 so it does not cover\n  the pendulum artwork.
 - Blank bottom edge: y=292..319; Return key handles Back.
 
 Per-tool layouts:
@@ -41,7 +41,7 @@ Per-tool layouts:
 |---|---|---|
 | Pomodoro | Focus/break + large remaining time + progress + session count | Start, reset, switch work/break; work/rest minutes |
 | Countdown | Large remaining time + progress | Start, reset; +/-1 minute or 10 seconds |
-| Metronome | BPM number + beat indicators | Start, beats, tap; +/-1 and +/-10 BPM |
+| Metronome | PR #9 swinging pendulum, classic pyramid and BPM markings | Existing lower controls retain their placement and hitboxes |
 | Converter | Source value over destination value, divided by thin rule | Units, swap; +/-1 and +/-10 |
 | Random | Large generated result + mode/range | Generate, mode; min/max |
 | Date | ISO date + offset from local today | Today; +/-1 and +/-30 days |
