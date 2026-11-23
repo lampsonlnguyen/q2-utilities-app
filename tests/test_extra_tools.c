@@ -52,6 +52,33 @@ int main(void) {
     show(&s,TOOL_METRONOME,4100,&leap,a,b,c);
     assert(strstr(a,"BPM") && strstr(b,"ACTIVE"));
 
+    /* Classic metronome: the pendulum angle follows beat phase, and
+     * the weight rides the log tempo scale (high for slow, low for
+     * fast). At 120 BPM the beat is 500 ms: centre at 0 ms, right
+     * extreme at 125 ms, centre at 250 ms, left extreme at 375 ms. */
+    assert(metro_pendulum_angle_deg(120,0)==0.0);
+    double angle=metro_pendulum_angle_deg(120,125);
+    assert(angle>23.0 && angle<25.0);
+    angle=metro_pendulum_angle_deg(120,250);
+    assert(angle>-1.0 && angle<1.0);
+    angle=metro_pendulum_angle_deg(120,375);
+    assert(angle>-25.0 && angle<-23.0);
+    assert(metro_pendulum_angle_deg(60,250)>23.0);
+    assert(metro_pendulum_angle_deg(0,100)==0.0);
+    assert(metro_weight_dist(40)==115.0);
+    assert(metro_weight_dist(208)==40.0);
+    assert(metro_weight_dist(60)>metro_weight_dist(120));
+    assert(metro_weight_dist(120)>metro_weight_dist(180));
+    assert(metro_weight_dist(120)>63.0 && metro_weight_dist(120)<67.0);
+    assert(metro_scale_y(120,192)==127);
+    assert(metro_scale_y(40,192)==77);
+    assert(metro_scale_y(208,192)==152);
+    double sx,cy;
+    metro_rod_dir(0.0,&sx,&cy);
+    assert(sx==0.0 && cy>0.99 && cy<1.01);
+    metro_rod_dir(90.0,&sx,&cy);
+    assert(sx>0.99 && sx<1.01 && cy>-0.01 && cy<0.01);
+
     show(&s,TOOL_CONVERTER,0,&leap,a,b,c);
     assert(strstr(a,"km") && strstr(b,"mi"));
     extra_action(&s,TOOL_CONVERTER,0,0,&leap);

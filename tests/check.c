@@ -167,7 +167,7 @@ static void expanded_utilities(void)
     back();assert(app.screen==TIME_GROUP);
     tap(50,78,5000);
     assert(app.screen==METRONOME);
-    tap(50,171,6000);
+    tap(70,240,6000); /* Start: metronome keys sit at y=226..253 now */
     assert(app.extra.metro.running);
     back();assert(app.screen==TIME_GROUP);
     tap(50,114,7000);
@@ -191,6 +191,57 @@ static void expanded_utilities(void)
         assert(app.screen==TOOL_GROUP);
     }
     back();assert(app.screen==HOME);
+}
+
+static bool gold_near(int cx, int cy, int r)
+{
+    for (int y = cy - r; y <= cy + r; ++y)
+        for (int x = cx - r; x <= cx + r; ++x) {
+            uint32_t p = pixels[x * HEIGHT + HEIGHT - 1 - y];
+            if ((p >> 16 & 255) > 180 && (p >> 8 & 255) > 120 && (p & 255) < 110)
+                return true;
+        }
+    return false;
+}
+
+static void metronome_classic(void)
+{
+    /* Classic pyramid in classic-light: at rest the rod hangs
+     * vertical on the centre line, the face is blue-tinted, the base
+     * is dark, and the weight sits on the 120 BPM mark (y=127). */
+    app_theme("[IPOD]\nTHEME=1\nCLASSIC_LIGHT_ACCENT=0\nLIGHT=1\n", 12);
+    tap(50, 203, 0); /* Clocks & Timers row */
+    assert(app.screen == TIME_GROUP);
+    tap(50, 78, 5000); /* Metronome row */
+    assert(app.screen == METRONOME);
+    /* expanded_utilities() above left it running; stop it so the
+     * at-rest frame really is at rest. */
+    if (app.extra.metro.running)
+        tap(70, 240, 5000);
+    assert(!app.extra.metro.running);
+    app_draw(&app, pixels, HEIGHT, 5000, UTC, &today);
+    assert(gold_near(187, 120, 4));
+    assert(gold_near(187, 127, 10)); /* weight on the 120 BPM mark */
+    uint32_t face = pixels[160 * HEIGHT + HEIGHT - 1 - 100];
+    assert((face & 255) > (face >> 16 & 255) + 20); /* blue, not grey */
+    uint32_t base = pixels[140 * HEIGHT + HEIGHT - 1 - 190];
+    assert((base >> 16 & 255) < 80 && (base >> 8 & 255) < 80 && (base & 255) < 80);
+    tap(70, 240, 6000); /* Start */
+    assert(app.extra.metro.running);
+    /* 125 ms into the 500 ms beat: pendulum at the right extreme. */
+    app_draw(&app, pixels, HEIGHT, 6125, UTC, &today);
+    assert(gold_near(237, 80, 5));
+    assert(!gold_near(137, 80, 5));
+    /* 375 ms in: left extreme. */
+    app_draw(&app, pixels, HEIGHT, 6375, UTC, &today);
+    assert(gold_near(137, 80, 5));
+    assert(!gold_near(237, 80, 5));
+    tap(70, 240, 7000); /* Stop */
+    assert(!app.extra.metro.running);
+    back(); /* -> TIME_GROUP */
+    assert(app.screen == TIME_GROUP);
+    back(); /* -> HOME */
+    assert(app.screen == HOME);
 }
 
 static void calculator(void)
@@ -251,6 +302,7 @@ int main(void)
     worldclock();
     tasks(path);
     expanded_utilities();
+    metronome_classic();
     calculator();
     assert(unlink(path) == 0);
     char counter_path[160];

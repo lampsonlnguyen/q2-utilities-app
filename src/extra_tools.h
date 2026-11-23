@@ -68,6 +68,19 @@ typedef struct {
 void extra_init(ExtraTools *tools, const char *task_path);
 void extra_enter(ExtraTools *tools, ToolKind kind, int64_t now);
 void extra_tick(ExtraTools *tools, int64_t now);
+
+/* Classic metronome geometry (pure, testable, no drawing): the pendulum
+ * swings sinusoidally at the beat, and the sliding weight sits on the
+ * tempo scale — higher BPM, lower on the rod. Angles are degrees from
+ * vertical, positive to the right; the beat ticks as the pendulum
+ * crosses the centre (phase 0 and 0.5). */
+#define METRO_PENDULUM_MAX_DEG 24.0
+double metro_pendulum_angle_deg(int bpm, int64_t elapsed_ms);
+double metro_weight_dist(int bpm); /* pivot -> weight, px (40..115) */
+int metro_scale_y(int bpm, int pivot_y); /* y of a tempo mark on the face */
+/* Pendulum rod direction for an angle in degrees: (sin, cos), so the
+ * screen point is pivot + dist * (sx, -cy). No libm. */
+void metro_rod_dir(double angle_deg, double *sx, double *cy);
 void extra_action(ExtraTools *tools, ToolKind kind, int code, int64_t now,
                   const struct tm *today);
 int extra_button_count(ToolKind kind);

@@ -79,6 +79,62 @@ void extra_enter(ExtraTools *s, ToolKind kind, int64_t now) {
     (void)now;
     if(kind==TOOL_METRONOME && s->metro.bpm==0)s->metro.bpm=120;
 }
+/* Classic metronome pendulum and tempo scale. No libm here: the Q2
+ * cross build has no libm to link, so sine is a Taylor polynomial
+ * (accurate to ~1e-4 over [-pi, pi]) and the log tempo scale is a
+ * table of log-spaced marks, linearly interpolated. */
+static double metro_sin(double x)
+{
+    /* Reduce to [-pi, pi] without fmod, then reflect into [-pi/2,
+     * pi/2], where the Taylor polynomial is accurate to ~2e-4. */
+    const double pi = 3.141592653589793;
+    while (x > pi) x -= 2.0 * pi;
+    while (x < -pi) x += 2.0 * pi;
+    if (x > pi / 2.0) x = pi - x;
+    else if (x < -pi / 2.0) x = -pi - x;
+    const double x2 = x * x;
+    return x * (1.0 - x2 / 6.0 * (1.0 - x2 / 20.0 * (1.0 - x2 / 42.0)));
+}
+double metro_pendulum_angle_deg(int bpm, int64_t elapsed_ms)
+{
+    if (bpm <= 0 || elapsed_ms < 0) return 0.0;
+    /* Beat period 60000/bpm ms; phase in [0,1) from integer cycles. */
+    const double cycles = (double)elapsed_ms * (double)bpm / 60000.0;
+    const double phase = cycles - (double)(int64_t)cycles;
+    return METRO_PENDULUM_MAX_DEG *
+           metro_sin(2.0 * 3.141592653589793 * phase);
+}
+double metro_weight_dist(int bpm)
+{
+    /* Log tempo scale, 40 BPM at the top of the rod to 208 at the
+     * pivot end: the weight rides high for slow tempos, low for fast. */
+    static const struct { int bpm; double dist; } marks[] = {
+        {40, 115}, {60, 100}, {80, 88}, {100, 78}, {120, 65},
+        {140, 56}, {160, 48}, {180, 44}, {208, 40},
+    };
+    if (bpm <= marks[0].bpm) return marks[0].dist;
+    const int n = (int)(sizeof marks / sizeof marks[0]);
+    if (bpm >= marks[n - 1].bpm) return marks[n - 1].dist;
+    for (int i = 0; i + 1 < n; ++i) {
+        if (bpm >= marks[i].bpm && bpm <= marks[i + 1].bpm) {
+            double t = (double)(bpm - marks[i].bpm) /
+                       (double)(marks[i + 1].bpm - marks[i].bpm);
+            return marks[i].dist + t * (marks[i + 1].dist - marks[i].dist);
+        }
+    }
+    return marks[n - 1].dist;
+}
+int metro_scale_y(int bpm, int pivot_y)
+{
+    return pivot_y - (int)(metro_weight_dist(bpm) + 0.5);
+}
+void metro_rod_dir(double angle_deg, double *sx, double *cy)
+{
+    const double pi = 3.141592653589793;
+    const double rad = angle_deg * pi / 180.0;
+    *sx = metro_sin(rad);
+    *cy = metro_sin(pi / 2.0 - rad);
+}
 void extra_tick(ExtraTools *s, int64_t now) {
     if(s->countdown.running && now>=s->countdown.due_ms) {
         s->countdown.running=false;
