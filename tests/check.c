@@ -37,14 +37,22 @@ static void stopwatch(void)
 {
     send("k u 218", 0);
     assert(app.screen == STOPWATCH);
-    tap(55, 140, 100);
-    tap(174, 140, 1600);
-    tap(55, 140, 2400);
+    /* Buttons: y=190..235. */
+    tap(55, 210, 100);
+    tap(174, 210, 1600);
+    tap(55, 210, 2400);
     assert(!app.running && app.elapsed == 2300 && app.laps[0] == 1500);
-    tap(55, 140, 3000);
-    tap(55, 140, 3200);
+    /* The 4x readout's digits reach y=100..110; the old 18 px text ended near y=96. */
+    uint32_t paper = pixels[2 * HEIGHT + HEIGHT - 1 - 120];
+    int ink = 0;
+    for (int y = 100; y < 110; ++y)
+        for (int x = 0; x < WIDTH; ++x)
+            ink += pixels[x * HEIGHT + HEIGHT - 1 - y] != paper;
+    assert(ink > 50);
+    tap(55, 210, 3000);
+    tap(55, 210, 3200);
     assert(app.elapsed == 2500);
-    tap(282, 140, 4000);
+    tap(282, 210, 4000);
     assert(!app.elapsed && !app.lap_count);
     back();
 }

@@ -282,11 +282,19 @@ static int64_t elapsed(const struct app *app, int64_t now)
     return app->elapsed + (app->running ? now - app->started : 0);
 }
 
+/* MM:SS.t under an hour, H:MM:SS.t after, so the readout stays short
+ * enough to draw large. Liberation Sans digits share one advance, so
+ * the running time never shifts sideways. */
 static void format_elapsed(char *text, size_t size, int64_t ms)
 {
-    snprintf(text, size, "%02lld:%02lld:%02lld.%01lld",
-             (long long)(ms / 3600000), (long long)(ms / 60000 % 60),
-             (long long)(ms / 1000 % 60), (long long)(ms / 100 % 10));
+    if (ms < 3600000)
+        snprintf(text, size, "%02lld:%02lld.%01lld",
+                 (long long)(ms / 60000), (long long)(ms / 1000 % 60),
+                 (long long)(ms / 100 % 10));
+    else
+        snprintf(text, size, "%lld:%02lld:%02lld.%01lld",
+                 (long long)(ms / 3600000), (long long)(ms / 60000 % 60),
+                 (long long)(ms / 1000 % 60), (long long)(ms / 100 % 10));
 }
 
 static int days_in_month(int year, int month)
@@ -500,9 +508,11 @@ static void make_layout(const struct app *app, struct layout *layout)
         /* The map picker has no list buttons; its input is separate. */
         break;
     case STOPWATCH:
-        button(layout, 18, 127, 108, 39, 0, app->running ? "Pause" : "Start");
-        button(layout, 134, 127, 107, 39, 1, "Lap");
-        button(layout, 249, 127, 108, 39, 2, "Reset");
+        /* Primary action row below the large readout (y=190..235, as
+         * in docs/compact-screen-ux.md). */
+        button(layout, 18, 190, 108, 46, 0, app->running ? "Pause" : "Start");
+        button(layout, 134, 190, 107, 46, 1, "Lap");
+        button(layout, 249, 190, 108, 46, 2, "Reset");
         break;
     case CALENDAR:
         button(layout, 18, 247, 108, 42, -1, "< Month");
@@ -1746,8 +1756,17 @@ static void draw_world_clock_detail(struct app *app, uint32_t *pixels, unsigned 
  * One glanceable result above the fold; controls below.
  * Scale the existing anti-aliased Q2 font at render time rather than shipping
  * large bitmaps or a second font. No dynamic allocations. */
+static void large_text(uint32_t *pixels,unsigned stride,int y,const char *label,
+                       int desired_scale,uint32_t color,bool crisp);
 static void large_centered(uint32_t *pixels,unsigned stride,int y,
                            const char *label,int desired_scale,uint32_t color)
+{
+    large_text(pixels,stride,y,label,desired_scale,color,false);
+}
+/* crisp: steepen the interpolated edge ramp so 3x-4x numerals stay
+ * sharp instead of reading as a soft glow (Stopwatch readout). */
+static void large_text(uint32_t *pixels,unsigned stride,int y,const char *label,
+                       int desired_scale,uint32_t color,bool crisp)
 {
     if(!label || !*label)return;
     int scale=desired_scale;
@@ -1775,6 +1794,8 @@ static void large_centered(uint32_t *pixels,unsigned stride,int y,
                               +a10*(unsigned)rx*(unsigned)(scale-cx)
                               +a11*(unsigned)rx*(unsigned)cx)/
                               (unsigned)(scale*scale);
+                if(crisp)
+                    alpha=alpha<=48?0:alpha>=208?255:(alpha-48)*255/160;
                 if(alpha) {
                     uint32_t *p=&pixels[(x+c)*stride+(HEIGHT-1-y-r)];
                     *p=0xff000000u|(alpha>=255?color:blend(*p,color,alpha));
@@ -1993,16 +2014,23 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         }
         break;
     }
-    case STOPWATCH:
+    case STOPWATCH: {
+        /* Glanceable readout: the Q2 font at 4x (88 px tall) for MM:SS.t,
+         * 3x once H:MM:SS.t no longer fits, kept centred vertically.
+         * Laps sit in a 2x2 grid of small text under it. */
         format_elapsed(value, sizeof value, elapsed(app, now));
-        centered(pixels, stride, 18, 78, 339, value, ACCENT);
+        int scale = text_width(value) * 4 <= WIDTH - 28 ? 4 : 3;
+        int y = (app->lap_count ? 36 : 62) + (4 - scale) * F20_H / 2;
+        large_text(pixels, stride, y, value, scale, ACCENT, true);
         for (unsigned i = 0; i < app->lap_count && i < LAP_LIMIT; ++i) {
             char time[32];
             format_elapsed(time, sizeof time, app->laps[i]);
-            snprintf(value, sizeof value, "Lap %u    %s", app->lap_count - i, time);
-            centered(pixels, stride, 18, 175 + 25 * (int)i, 339, value, MUTED);
+            snprintf(value, sizeof value, "Lap %u  %s", app->lap_count - i, time);
+            small_line(pixels, stride, 12 + (int)(i % 2) * 176, 140 + (int)(i / 2) * 20,
+                       175, value, i ? MUTED : INK);
         }
         break;
+    }
     case CALENDAR:
         draw_calendar(app, pixels, stride, today);
         break;
