@@ -46,6 +46,7 @@ Per-tool layouts:
 | Random | Large generated result + mode/range | Generate, mode; min/max |
 | Date | ISO date + offset from local today | Today; +/-1 and +/-30 days |
 | Engineering | Formula result + parameters + editing field | Mode, select field; fine/coarse changes |
+| Stopwatch | 4x MM:SS.t readout (H:MM:SS.t past an hour) + latest four laps in a 2x2 grid | Start/Pause, Lap, Reset |
 | Counter | Selected counter with large count + four channels | Increment, decrement, reset, next/previous |
 
 Buttons preserve the previous action codes and engine semantics; only

@@ -4,7 +4,7 @@ A full-screen utility card app for the Shanling Q2 running [Q2 Pod](https://gith
 
 | Tool | Features |
 | --- | --- |
-| Stopwatch | Start, pause, resume, and reset. Records cumulative lap times and shows the latest four. Timing continues when you return to the Utilities menu while the app is open. |
+| Stopwatch | Start, pause, resume, and reset. Shows elapsed time in large digits (MM:SS.t, then H:MM:SS.t after an hour) that are readable at a glance. Records cumulative lap times and shows the latest four. Timing continues when you return to the Utilities menu while the app is open. |
 | World Clock | Local time in 16 preset cities, each with its Casio-style 3-letter code, date, UTC offset, daylight-saving state, and day/night. Select a city for a detail view with its full date, offset, and difference from Los Angeles. A **World map** button at the bottom of the list opens a tiny world map with GMT bands: turn the wheel to move the pin west to east, or tap the map, and press Centre to open that city's detail view. |
 | Calendar | Browse months, highlight the player's current date, and jump back with **Today**. The date comes from the Q2 clock. |
 | To-do | Add, complete, reopen, and delete up to 32 tasks. Use the on-screen keyboard for names up to 24 characters. Tasks are saved in `.utilities-app/tasks.tsv` on the SD card. |
