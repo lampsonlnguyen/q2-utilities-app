@@ -1757,16 +1757,43 @@ static void draw_world_clock_detail(struct app *app, uint32_t *pixels, unsigned 
  * Scale the existing anti-aliased Q2 font at render time rather than shipping
  * large bitmaps or a second font. No dynamic allocations. */
 static void large_text(uint32_t *pixels,unsigned stride,int y,const char *label,
-                       int desired_scale,uint32_t color,bool crisp);
+                       int desired_scale,uint32_t color,bool smooth);
 static void large_centered(uint32_t *pixels,unsigned stride,int y,
                            const char *label,int desired_scale,uint32_t color)
 {
     large_text(pixels,stride,y,label,desired_scale,color,false);
 }
-/* crisp: steepen the interpolated edge ramp so 3x-4x numerals stay
- * sharp instead of reading as a soft glow (Stopwatch readout). */
+/* Cubic interpolation of the coverage mask for large stopwatch digits.
+ * Preserve intermediate alpha values rather than clipping the edge ramp. */
+static int cubic_alpha(int a, int b, int c, int d, int t, int scale)
+{
+    int t2 = t * t, t3 = t2 * t, s2 = scale * scale, s3 = s2 * scale;
+    return (2*b*s3 + (-a+c)*t*s2 + (2*a-5*b+4*c-d)*t2*scale
+            + (-a+3*b-3*c+d)*t3 + s3) / (2*s3);
+}
+
+static int mask_alpha(const unsigned char *bitmap, int width, int r, int c)
+{
+    if (r < 0 || r >= F20_H || c < 0 || c >= width) return 0;
+    return bitmap[r*width+c];
+}
+
+static unsigned smooth_alpha(const unsigned char *bitmap, int width,
+                             int r, int c, int ry, int cx, int scale)
+{
+    int rows[4];
+    for (int i = 0; i < 4; ++i) {
+        int y = r+i-1;
+        rows[i] = cubic_alpha(mask_alpha(bitmap,width,y,c-1),
+                              mask_alpha(bitmap,width,y,c),
+                              mask_alpha(bitmap,width,y,c+1),
+                              mask_alpha(bitmap,width,y,c+2),cx,scale);
+    }
+    int a = cubic_alpha(rows[0],rows[1],rows[2],rows[3],ry,scale);
+    return (unsigned)(a < 0 ? 0 : a > 255 ? 255 : a);
+}
 static void large_text(uint32_t *pixels,unsigned stride,int y,const char *label,
-                       int desired_scale,uint32_t color,bool crisp)
+                       int desired_scale,uint32_t color,bool smooth)
 {
     if(!label || !*label)return;
     int scale=desired_scale;
@@ -1794,8 +1821,8 @@ static void large_text(uint32_t *pixels,unsigned stride,int y,const char *label,
                               +a10*(unsigned)rx*(unsigned)(scale-cx)
                               +a11*(unsigned)rx*(unsigned)cx)/
                               (unsigned)(scale*scale);
-                if(crisp)
-                    alpha=alpha<=48?0:alpha>=208?255:(alpha-48)*255/160;
+                if(smooth)
+                    alpha=smooth_alpha(bitmap,advance,src_r,src_c,rx,cx,scale);
                 if(alpha) {
                     uint32_t *p=&pixels[(x+c)*stride+(HEIGHT-1-y-r)];
                     *p=0xff000000u|(alpha>=255?color:blend(*p,color,alpha));
