@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "browse.h"
 #include <errno.h>
 #include <dirent.h>
@@ -52,17 +55,26 @@ bool menu_screen(const char *uri, enum screen *out)
 #define DEADLINE "/tmp/q2-utilities-app.timer"
 #define PATH_SIZE 512
 
-/* The target glibc 2.28 exports __xstat, not the libc_nonshared stat wrapper. */
+/* statx is exported by the Q2's glibc 2.28, unlike stat.
+ * Its fixed-width kernel ABI avoids legacy _STAT_VER and stat layouts. */
 #if defined(__mips__) && defined(__GLIBC__)
-extern int __xstat(int, const char *, struct stat *);
-static int file_stat(const char *path, struct stat *st)
+static int file_info(const char *path, unsigned *mode, uint64_t *size)
 {
-    return __xstat(_STAT_VER, path, st);
+    struct statx st;
+    if (statx(AT_FDCWD, path, 0, STATX_TYPE | STATX_SIZE, &st)) return -1;
+    if ((st.stx_mask & (STATX_TYPE | STATX_SIZE)) != (STATX_TYPE | STATX_SIZE)) return -1;
+    *mode = st.stx_mode;
+    *size = st.stx_size;
+    return 0;
 }
 #else
-static int file_stat(const char *path, struct stat *st)
+static int file_info(const char *path, unsigned *mode, uint64_t *size)
 {
-    return stat(path, st);
+    struct stat st;
+    if (stat(path, &st)) return -1;
+    *mode = st.st_mode;
+    *size = (uint64_t)st.st_size;
+    return 0;
 }
 #endif
 
@@ -78,12 +90,13 @@ static bool audio_file(const char *path)
 static bool valid_path(const char *path, bool directory)
 {
     char resolved[PATH_MAX];
-    struct stat st;
+    unsigned mode;
+    uint64_t size;
     if(strlen(path)>=PATH_SIZE || strpbrk(path,"\r\n\t") ||
        !realpath(path,resolved) ||
        (strcmp(resolved,CARD) && strncmp(resolved,CARD "/",sizeof CARD)) ||
-       file_stat(resolved,&st)) return false;
-    return directory?S_ISDIR(st.st_mode):S_ISREG(st.st_mode)&&audio_file(resolved);
+       file_info(resolved,&mode,&size)) return false;
+    return directory?S_ISDIR(mode):S_ISREG(mode)&&audio_file(resolved);
 }
 static bool put(const char *path,const char *value)
 {
@@ -167,8 +180,9 @@ static bool make_clip(const char *song,int start,const char *dest)
     char *args[]={"ffmpeg","-nostdin","-v","error","-y","-ss",offset,"-i",(char *)song,
                   "-t","10","-map","0:a:0","-vn","-ac","2","-ar","44100",
                   "-c:a","pcm_s16le",temp,NULL};
-    struct stat st;
-    if(ffmpeg(args,NULL,0)==0 && !file_stat(temp,&st) && st.st_size>44 && !rename(temp,dest)) return true;
+    unsigned mode;
+    uint64_t size;
+    if(ffmpeg(args,NULL,0)==0 && !file_info(temp,&mode,&size) && S_ISREG(mode) && size>44 && !rename(temp,dest)) return true;
     unlink(temp);
     return false;
 }
