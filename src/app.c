@@ -944,7 +944,6 @@ static void timer_action(struct app *app, int code, int64_t now)
 static void timer_input(struct app *app,const char *message,int64_t now)
 {
     int travel, a,b; char phase;
-    CountdownState *t=&app->extra.countdown;
     if(sscanf(message,"w %d",&travel)==1) {
         if(now-app->wheel_at>=WHEEL_IDLE_MS ||
            (app->wheel>0 && travel<0)||(app->wheel<0 && travel>0)) app->wheel=0;
