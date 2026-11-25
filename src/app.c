@@ -190,7 +190,7 @@ static const char *const titles[] = {
     "Utilities", "Stopwatch", "Calendar", "To-do", "Calculator",
     "World Clock", "World Clock", "New task", "Task options", "World map",
     "Clocks & Timers", "Tools & Calculators", "Pomodoro", "Metronome",
-    "Countdown", "Unit Converter", "Random Generator", "Date Calculator",
+    "Timer", "Unit Converter", "Random Generator", "Date Calculator",
     "Engineering", "Event Counter"
 };
 
@@ -408,7 +408,7 @@ static void make_layout(const struct app *app, struct layout *layout)
          * other tools keep their relative order. */
         /* Keep unfinished utilities and their code available for future work,
          * but do not expose their category submenus to users yet. */
-        static const enum screen order[] = {STOPWATCH, WORLD_CLOCK, CALENDAR, TODO, CALCULATOR};
+        static const enum screen order[] = {STOPWATCH, COUNTDOWN, WORLD_CLOCK, CALENDAR, TODO, CALCULATOR};
         for (unsigned i = 0; i < sizeof order / sizeof order[0]; ++i)
             button(layout, 0, 26 + (int)i * 32, WIDTH, 32, order[i], titles[order[i]]);
         break;
@@ -425,7 +425,12 @@ static void make_layout(const struct app *app, struct layout *layout)
             button(layout,0,26+i*36,WIDTH,36,order[i],titles[order[i]]);
         break;
     }
-    case POMODORO: case METRONOME: case COUNTDOWN: case CONVERTER:
+    case COUNTDOWN:
+        for (int i=0;i<3;i++) button(layout,12+i*117,45,117,146,i,"");
+        button(layout,20,215,150,52,3,"Cancel");
+        button(layout,205,215,150,52,4,app->extra.countdown.running?"Pause":"Start");
+        break;
+    case POMODORO: case METRONOME: case CONVERTER:
     case RANDOMIZER: case DATE_CALC: case ENGINEERING: case EVENT_COUNTER: {
         ToolKind kind=app->screen==POMODORO?TOOL_POMODORO:
                       app->screen==METRONOME?TOOL_METRONOME:
@@ -895,8 +900,97 @@ static void world_clock_map_input(struct app *app, const char *message)
     }
 }
 
+static void timer_adjust(struct app *app, int field, int delta)
+{
+    CountdownState *t=&app->extra.countdown;
+    if (t->running || field<0 || field>2) return;
+    int seconds=(int)(t->remaining_ms/1000);
+    int parts[3]={seconds/3600,seconds/60%60,seconds%60};
+    int limit=field==0?24:60;
+    parts[field]=((parts[field]+delta)%limit+limit)%limit;
+    t->remaining_ms=t->preset_ms=(int64_t)(parts[0]*3600+parts[1]*60+parts[2])*1000;
+    app->timer_started=false;
+    app->timer_alarm=false;
+}
+
+static void timer_action(struct app *app, int code, int64_t now)
+{
+    CountdownState *t=&app->extra.countdown;
+    if(code<3) {
+        if(!t->running) app->timer_edit=!app->timer_edit;
+        return;
+    }
+    app->timer_edit=false;
+    if(code==3) {
+        t->running=false;
+        t->remaining_ms=t->preset_ms;
+        app->timer_started=app->timer_alarm=false;
+        app->focus=0;
+    } else if(app->timer_alarm) {
+        app->timer_alarm=app->timer_started=false;
+        t->remaining_ms=t->preset_ms;
+        app->focus=0;
+    } else if(t->running) {
+        t->remaining_ms=t->due_ms>now?t->due_ms-now:0;
+        t->running=false;
+    } else if(t->remaining_ms>0) {
+        t->due_ms=now+t->remaining_ms;
+        t->running=true;
+        app->timer_started=true;
+    }
+}
+
+static void timer_input(struct app *app,const char *message,int64_t now)
+{
+    int travel, a,b; char phase;
+    CountdownState *t=&app->extra.countdown;
+    if(sscanf(message,"w %d",&travel)==1) {
+        if(now-app->wheel_at>=WHEEL_IDLE_MS ||
+           (app->wheel>0 && travel<0)||(app->wheel<0 && travel>0)) app->wheel=0;
+        app->wheel_at=now;
+        int64_t fine=(int64_t)travel*WHEEL_FINE+app->wheel;
+        int step=(int)(fine/app->wheel_units);
+        app->wheel=(int)(fine%app->wheel_units);
+        if(app->timer_edit) timer_adjust(app,app->focus,-step);
+        else {
+            int min=t->running||app->timer_alarm?3:0;
+            int next=app->focus-step;
+            app->focus=next<min?min:next>4?4:next;
+        }
+    } else if(sscanf(message,"k %c %d",&phase,&a)==2 && phase=='u') {
+        if(a==CENTRE_KEY) timer_action(app,app->focus,now);
+        else if(a==RETURN_KEY) {
+            if(app->timer_edit) app->timer_edit=false;
+            else screen(app,HOME);
+        }
+    } else if(sscanf(message,"t %c %d %d",&phase,&a,&b)==3) {
+        struct layout layout; make_layout(app,&layout);
+        int index=hit(&layout,a,b);
+        if(phase=='d') {
+            app->touch_button=index;
+            app->timer_touch_y=b;
+        } else if(phase=='u') {
+            int field=app->touch_button;
+            app->touch_button=-1;
+            if(field<0) return;
+            if(field<3 && !t->running && !app->timer_alarm) {
+                app->focus=field;
+                int dy=app->timer_touch_y-b;
+                if(dy>12||dy<-12) timer_adjust(app,field,dy/12);
+                else if(index==field && b<94) timer_adjust(app,field,-1);
+                else if(index==field && b>142) timer_adjust(app,field,1);
+                else if(index==field) app->timer_edit=!app->timer_edit;
+            } else if(field>=3 && index==field) {
+                app->focus=field;
+                timer_action(app,field,now);
+            }
+        }
+    }
+}
+
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today)
 {
+    if(app->screen==COUNTDOWN) { timer_input(app,message,now); return; }
     int travel;
     if (sscanf(message, "w %d", &travel) == 1) {
         wheel_move(app, travel, now);
@@ -1989,6 +2083,51 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
     }
 }
 
+static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t now)
+{
+    CountdownState *t=&app->extra.countdown;
+    if(app->timer_started && !t->running && t->remaining_ms==0) app->timer_alarm=true;
+    if(app->timer_alarm || t->running || app->timer_started) {
+        int64_t rem=tool_remaining(t->due_ms,t->remaining_ms,now,t->running);
+        int sec=(int)((rem+999)/1000);
+        char value[24];
+        snprintf(value,sizeof value,"%02d:%02d:%02d",sec/3600,sec/60%60,sec%60);
+        large_text(pixels,stride,70,value,3,app->timer_alarm?SCHEME.accent_red:ACCENT,true);
+        small_centered(pixels,stride,145,app->timer_alarm?"TIME IS UP":t->running?"TIMER RUNNING":"PAUSED",INK);
+        progress_bar(pixels,stride,rem,t->preset_ms);
+    } else {
+        int sec=(int)(t->remaining_ms/1000);
+        int parts[3]={sec/3600,sec/60%60,sec%60};
+        const char *units[]={"hr","min","sec"};
+        fill(pixels,stride,12,101,351,37,SCHEME.fill);
+        for(int i=0;i<3;i++) {
+            int x=12+i*117,limit=i==0?24:60;
+            char label[24];
+            for(int j=-2;j<=2;j++) {
+                int n=(parts[i]+j+limit)%limit;
+                if(j==0) {
+                    snprintf(label,sizeof label,"%02d %s",n,units[i]);
+                    if(app->focus==i) paint_selection(pixels,stride,x+2,101,113,37);
+                    centered(pixels,stride,x,108,117,label,app->focus==i?sel_text_color():INK);
+                } else {
+                    snprintf(label,sizeof label,"%02d",n);
+                    uint32_t color=blend(BG,MUTED,j==1||j==-1?200:90);
+                    centered(pixels,stride,x,109+j*30,117,label,color);
+                }
+            }
+        }
+        small_centered(pixels,stride,185,app->timer_edit?"Wheel adjusts  /  Centre confirms":"Centre edits  /  Swipe adjusts",MUTED);
+    }
+    const char *labels[]={app->timer_alarm?"Dismiss":"Cancel",app->timer_alarm?"Done":t->running?"Pause":app->timer_started?"Resume":"Start"};
+    for(int i=0;i<2;i++) {
+        int x=i?205:20;
+        uint32_t color=i?ACCENT:SCHEME.fill;
+        fill(pixels,stride,x,215,150,52,color);
+        if(app->focus==i+3) outline(pixels,stride,x,215,150,52,INK);
+        centered(pixels,stride,x,230,150,labels[i],i?0xffffffu:INK);
+    }
+}
+
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, time_t utc, const struct tm *today)
 {
     extra_tick(&app->extra,now);
@@ -2017,6 +2156,7 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         upper(title);
     centered(pixels, stride, 0, 3, WIDTH, title, INK);
     char value[64];
+    if(app->screen==COUNTDOWN) { draw_timer(app,pixels,stride,now); return; }
 
     switch (app->screen) {
     case POMODORO: case METRONOME: case COUNTDOWN: case CONVERTER:
