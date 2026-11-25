@@ -28,11 +28,9 @@ extern int q2_sscanf(const char *, const char *, ...) __asm__("__isoc99_sscanf")
     __attribute__((format(scanf, 2, 3)));
 extern int q2_fscanf(FILE *, const char *, ...) __asm__("__isoc99_fscanf")
     __attribute__((format(scanf, 2, 3)));
-extern long q2_strtol(const char *, char **, int) __asm__("strtol");
 #else
 #define q2_sscanf sscanf
 #define q2_fscanf fscanf
-#define q2_strtol strtol
 #endif
 
 #define SOCK "/tmp/q2-utilities-app.browse.sock"
@@ -308,15 +306,25 @@ static void escaped(FILE *out,const char *s)
         else fputc(c,out);
     }
 }
+/* Avoid atoi/strtol: newer glibc inlines atoi through __isoc23_strtol.
+ * Protocol escapes are exactly two hex digits, so parse them directly. */
+static int hex_digit(unsigned char c)
+{
+    if(c>='0' && c<='9') return c-'0';
+    if(c>='a' && c<='f') return c-'a'+10;
+    if(c>='A' && c<='F') return c-'A'+10;
+    return -1;
+}
 static bool decode(char *s)
 {
     char *w=s;
     for(char *p=s;*p;p++) {
         if(*p=='%') {
             if(!p[1]||!p[2]) return false;
-            char hex[3]={p[1],p[2],0},*end;
-            long n=q2_strtol(hex,&end,16);
-            if(*end||n<=0||n>255) return false;
+            int hi=hex_digit((unsigned char)p[1]);
+            int lo=hex_digit((unsigned char)p[2]);
+            if(hi<0||lo<0||(hi==0&&lo==0)) return false;
+            int n=hi*16+lo;
             *w++=(char)n; p+=2;
         } else *w++=*p;
     }
@@ -442,7 +450,8 @@ static void reply(int fd)
               !strcmp(op,"clippreview")||!strcmp(op,"clipsave")) {
         char song[PATH_SIZE],*arg=strchr(request+9,'\t');
         if(arg) arg=strchr(arg+1,'\t');
-        int start=arg?atoi(arg+1):0;
+        int start=0;
+        if(arg && q2_sscanf(arg+1,"%8d",&start)!=1) start=0;
         int duration=selected_song(song,sizeof song)?song_length(song):0;
         if(!strcmp(op,"clipseek")) {
             char *value=arg?strchr(arg+1,'\t'):NULL;
