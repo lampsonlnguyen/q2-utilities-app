@@ -158,6 +158,8 @@ int main(int argc, char **argv)
         if (!can_pan)
             app_draw(&app, memory + visible * stride, stride, now, date, &today);
         int timeout = app.screen == STOPWATCH && app.running ? 100 : 1000;
+        if (app.screen == COUNTDOWN && app.extra.countdown.running)
+            timeout = 100;
         if (app.screen == METRONOME && app.extra.metro.running) {
             /* Redraw on beat boundaries rather than refreshing the entire
              * LCD 20-30 times/s. The rational BPM math prevents long-term

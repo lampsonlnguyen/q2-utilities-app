@@ -44,6 +44,8 @@ struct app {
     char op;
     bool entering, error;
     char number[32];
+    bool timer_edit, timer_alarm, timer_started;
+    int timer_touch_y;
     ExtraTools extra;
 };
 

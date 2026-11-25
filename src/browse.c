@@ -15,6 +15,7 @@ static void stop_menu(int sig) { (void)sig; stopped = 1; }
 
 static const struct { const char *uri, *title; enum screen screen; } tools[] = {
     {"stopwatch", "Stopwatch", STOPWATCH},
+    {"timer", "Timer", COUNTDOWN},
     {"world-clock", "World Clock", WORLD_CLOCK},
     {"calendar", "Calendar", CALENDAR},
     {"todo", "To-Do List", TODO},
