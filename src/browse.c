@@ -14,6 +14,8 @@
 #include <sys/time.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #define SOCK "/tmp/q2-utilities-app.browse.sock"
 static volatile sig_atomic_t stopped;
@@ -41,6 +43,9 @@ bool menu_screen(const char *uri, enum screen *out)
 
 #define CARD "/mnt/mmc"
 #define SONG_FILE CARD "/.utilities-app/alarm-song"
+#define CLIP CARD "/.utilities-app/alarm.wav"
+#define PREVIEW CARD "/.utilities-app/preview.wav"
+#define OFFSET CARD "/.utilities-app/alarm-offset"
 #define QUEUE CARD "/.utilities-app/alarm.m3u"
 #define PLAY "/tmp/q2-utilities-app.play"
 #define STATE "/tmp/q2-utilities-app.state"
@@ -93,15 +98,89 @@ static const char *base(const char *p)
     const char *s=strrchr(p,'/');
     return s?s+1:p;
 }
-bool alarm_play(void)
+
+/* The stock Q2 ships ffmpeg 4.2; use argv, never a shell command. */
+static int ffmpeg(char *const args[], char *log, size_t size)
 {
-    char song[PATH_SIZE],line[128];
-    if(!selected_song(song,sizeof song)) return false;
-    if(!put(QUEUE,song)) return false;
+    int pipefd[2];
+    if(pipe(pipefd)) return -1;
+    pid_t child=fork();
+    if(child==0) {
+        close(pipefd[0]);
+        dup2(pipefd[1],STDERR_FILENO);
+        close(pipefd[1]);
+        execv("/usr/bin/ffmpeg",args);
+        _exit(127);
+    }
+    close(pipefd[1]);
+    if(child<0) { close(pipefd[0]); return -1; }
+    size_t used=0;
+    int status=0, elapsed=0;
+    bool exited=false;
+    while(elapsed<8000 && !stopped) {
+        struct pollfd p={.fd=pipefd[0],.events=POLLIN};
+        if(poll(&p,1,100)>0) {
+            char buf[512];
+            ssize_t n=read(pipefd[0],buf,sizeof buf);
+            if(n>0 && log && used<size-1) {
+                size_t copy=(size_t)n<size-1-used?(size_t)n:size-1-used;
+                memcpy(log+used,buf,copy); used+=copy;
+            }
+        }
+        if(waitpid(child,&status,WNOHANG)==child) { exited=true; break; }
+        elapsed+=100;
+    }
+    if(!exited) { kill(child,SIGKILL); waitpid(child,&status,0); }
+    if(log && size) log[used]=0;
+    close(pipefd[0]);
+    return exited&&WIFEXITED(status)?WEXITSTATUS(status):-1;
+}
+static int song_length(const char *path)
+{
+    char log[8192];
+    char *args[]={"ffmpeg","-nostdin","-hide_banner","-i",(char *)path,NULL};
+    ffmpeg(args,log,sizeof log);
+    const char *d=strstr(log,"Duration: ");
+    int h,m; double s;
+    if(!d||sscanf(d+10,"%d:%d:%lf",&h,&m,&s)!=3) return 0;
+    return h*3600+m*60+(int)s;
+}
+static bool make_clip(const char *song,int start,const char *dest)
+{
+    char offset[24],temp[PATH_SIZE];
+    snprintf(offset,sizeof offset,"%d",start);
+    if(snprintf(temp,sizeof temp,"%s.tmp.wav",dest)>=(int)sizeof temp) return false;
+    char *args[]={"ffmpeg","-nostdin","-v","error","-y","-ss",offset,"-i",(char *)song,
+                  "-t","10","-map","0:a:0","-vn","-ac","2","-ar","44100",
+                  "-c:a","pcm_s16le",temp,NULL};
+    struct stat st;
+    if(ffmpeg(args,NULL,0)==0 && !stat(temp,&st) && st.st_size>44 && !rename(temp,dest)) return true;
+    unlink(temp);
+    return false;
+}
+static int saved_offset(void)
+{
+    FILE *f=fopen(OFFSET,"r");
+    int n=0;
+    if(f) { if(fscanf(f,"%d",&n)!=1) n=0; fclose(f); }
+    return n<0?0:n;
+}
+static bool play_path(const char *song)
+{
+    char line[128],list[PATH_SIZE+2];
+    snprintf(list,sizeof list,"%s\n",song);
+    if(!put(QUEUE,list)) return false;
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC,&ts);
     snprintf(line,sizeof line,"%ld%09ld %s\n",(long)ts.tv_sec,ts.tv_nsec,QUEUE);
     return put(PLAY,line);
+}
+bool alarm_play(void)
+{
+    char song[PATH_SIZE];
+    if(!selected_song(song,sizeof song)) return false;
+    if(access(CLIP,R_OK)==0) return play_path(CLIP);
+    return play_path(song);
 }
 void alarm_deadline(int64_t due)
 {
@@ -167,7 +246,8 @@ static void sound_menu(FILE *out,const char *id)
     header(out,id,"","");
     row(out,"info","","Selected song",selected_song(path,sizeof path)?base(path):"None","");
     row(out,"list","folder","Choose from Library","",CARD);
-    row(out,"action","preview","Preview selected song","","");
+    row(out,"list","clip","Edit 10-second clip","","");
+    row(out,"action","preview","Preview alarm","","");
     row(out,"action","clear","Clear selection","","");
 }
 /* Read only one directory. Bound memory to 48 names, and page by a stable
@@ -204,6 +284,32 @@ static void folder(FILE *out,const char *id,const char *path,const char *cursor)
     if(!n) row(out,"info","","No music or folders","","");
 }
 
+static int draft_start=-1;
+
+static void clip_menu(FILE *out,const char *id,int start)
+{
+    char song[PATH_SIZE],range[64],arg[32];
+    if(!selected_song(song,sizeof song)) {
+        header(out,id,"",""); row(out,"info","","Choose a song first","",""); return;
+    }
+    int duration=song_length(song);
+    if(duration<10) {
+        header(out,id,"",""); row(out,"info","","Song shorter than 10 seconds or unreadable","",""); return;
+    }
+    if(start<0) start=0;
+    if(start>duration-10) start=duration-10;
+    snprintf(range,sizeof range,"%02d:%02d - %02d:%02d",start/60,start%60,(start+10)/60,(start+10)%60);
+    snprintf(arg,sizeof arg,"%d",start);
+    header(out,id,"","");
+    row(out,"info","",base(song),range,"");
+    /* Firmware lists provide the theme, selection and native wheel input. */
+    row(out,"field","clipseek","Start time (MM:SS)",range,arg);
+    row(out,"action","clipback","Back 10 seconds","",arg);
+    row(out,"action","clipnext","Forward 10 seconds","",arg);
+    row(out,"action","clippreview","Preview 10 seconds","",arg);
+    row(out,"action","clipsave","Save alarm clip","",arg);
+}
+
 static void reply(int fd)
 {
     char request[8193], id[24], op[24];
@@ -235,10 +341,37 @@ static void reply(int fd)
         row(out,"list","sound","Alarm Sound","","");
     } else if(!strcmp(op,"sound")) {
         sound_menu(out,id);
+    } else if(!strcmp(op,"clip")) {
+        if(draft_start<0) draft_start=saved_offset();
+        clip_menu(out,id,draft_start);
+    } else if(!strcmp(op,"clipseek")||!strcmp(op,"clipback")||!strcmp(op,"clipnext")||
+              !strcmp(op,"clippreview")||!strcmp(op,"clipsave")) {
+        char song[PATH_SIZE],*arg=strchr(request+9,'\t');
+        if(arg) arg=strchr(arg+1,'\t');
+        int start=arg?atoi(arg+1):0;
+        int duration=selected_song(song,sizeof song)?song_length(song):0;
+        if(!strcmp(op,"clipseek")) {
+            char *value=arg?strchr(arg+1,'\t'):NULL;
+            int m=0,s=0;
+            if(value && sscanf(value+1,"%d:%d",&m,&s)==2 && m>=0 && m<=100000 && s>=0 && s<60)
+                start=m*60+s;
+        } else if(!strcmp(op,"clipback")) start-=10;
+        else if(!strcmp(op,"clipnext")) start+=10;
+        if(start<0) start=0;
+        if(duration>=10 && start>duration-10) start=duration-10;
+        draft_start=start;
+        if(!strcmp(op,"clipseek")) clip_menu(out,id,start);
+        else if(!strcmp(op,"clipback")||!strcmp(op,"clipnext")) header(out,id,"","");
+        else if(duration<10) header(out,id,"Song unavailable","");
+        else if(!strcmp(op,"clippreview")) header(out,id,make_clip(song,start,PREVIEW)&&play_path(PREVIEW)?"Playing clip":"Preview failed","");
+        else {
+            char value[24]; snprintf(value,sizeof value,"%d",start);
+            header(out,id,make_clip(song,start,CLIP)&&put(OFFSET,value)?"Alarm clip saved":"Unable to save clip","");
+        }
     } else if(!strcmp(op,"preview")) {
         header(out,id,alarm_play()?"Playing selected song":"Choose a song first","");
     } else if(!strcmp(op,"clear")) {
-        unlink(SONG_FILE);
+        unlink(SONG_FILE); unlink(CLIP); unlink(OFFSET); draft_start=-1;
         header(out,id,"Selection cleared","");
     } else if(!strcmp(op,"folder")||!strcmp(op,"choose")) {
         char *arg=request+9;
@@ -253,7 +386,11 @@ static void reply(int fd)
             if(!cursor) cursor="";
             if(decode(arg)&&(!*cursor||decode(cursor))) {
                 if(!strcmp(op,"folder")) folder(out,id,arg,cursor);
-                else header(out,id,valid_path(arg,false)&&put(SONG_FILE,arg)?"Alarm song saved":"Unable to save song","");
+                else {
+                    bool ok=valid_path(arg,false)&&put(SONG_FILE,arg);
+                    if(ok) { unlink(CLIP); unlink(OFFSET); draft_start=-1; }
+                    header(out,id,ok?"Alarm song saved":"Unable to save song","");
+                }
             } else header(out,id,"Invalid path","");
         } else header(out,id,"Missing path","");
     } else {
