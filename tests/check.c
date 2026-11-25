@@ -59,7 +59,7 @@ static void stopwatch(void)
 
 static void calendar(void)
 {
-    tap(50, 106, 0); /* Calendar row: y=90..121 */
+    tap(50, 138, 0); /* Calendar row: y=90..121 */
     assert(app.screen == CALENDAR && app.year == 2024 && app.month == 1);
     /* Minimal dark: today is the card fill (0x2b2b2b) in its new grid cell. */
     assert(pixels[235 * HEIGHT + HEIGHT - 1 - 176] == 0xff2b2b2b);
@@ -91,21 +91,21 @@ static void wheel(void)
     send("w -26", 70); /* 35 units total, exactly four ticks at 160%. */
     assert(app.focus == 4);
     send("w -200", 80);
-    assert(app.focus == 4); /* Pins at the last visible row. */
+    assert(app.focus == 5); /* Pins at the last visible row. */
 
     app_wheel_config(&app, "[Q2POD]\nWHEELSENSITIVITY=1600\n");
     send("w 27", 90);
     send("w 1", 1090); /* Old residual travel expires. */
-    assert(app.focus == 4);
+    assert(app.focus == 5);
     send("w 27", 1100);
-    assert(app.focus == 3);
+    assert(app.focus == 4);
     send("w 200", 1110);
     assert(app.focus == 0);
 }
 
 static void worldclock(void)
 {
-    tap(50, 74, 0); /* World Clock row: y=58..89 */
+    tap(50, 106, 0); /* World Clock row: y=58..89 */
     assert(app.screen == WORLD_CLOCK && app.focus == 0 && app.wc_top == 0);
     /* Classic Blue: gloss band top line on the selected 52 px row. */
     app_theme("[IPOD]\nTHEME=1\nCLASSIC_LIGHT_ACCENT=0\nLIGHT=1\n", 12);
@@ -152,7 +152,7 @@ static void key(int k, int64_t now)
 
 static void t9(void)
 {
-    tap(50, 138, 0); /* To-do row */
+    tap(50, 170, 0); /* To-do row */
     tap(50, 250, 0); /* + New task */
     assert(app.screen == EDIT_TASK && app.focus == 1); /* wheel on abc */
     key(1, 1000);
@@ -187,7 +187,7 @@ static void t9(void)
 
 static void tasks(const char *path)
 {
-    tap(50, 138, 0); /* To-do row: y=122..153 */
+    tap(50, 170, 0); /* To-do row: y=122..153 */
     tap(50, 250, 0);
     assert(app.screen == EDIT_TASK);
     key(7, 0);  /* ABC */
@@ -199,7 +199,7 @@ static void tasks(const char *path)
     app_init(&app, path);
     assert(app.task_count == 1 && app.tasks[0].done && !strcmp(app.tasks[0].text, "A"));
 
-    tap(50, 138, 0);
+    tap(50, 170, 0);
     tap(50, 42, 0);
     tap(50, 114, 0); /* Delete task row: y=98..129 */
     app_init(&app, path);
@@ -207,7 +207,7 @@ static void tasks(const char *path)
 
     /* Names hold TASK_LENGTH (140) characters; the 141st is ignored,
      * and the full name survives a save and reload. */
-    tap(50, 138, 0);
+    tap(50, 170, 0);
     tap(50, 250, 0);
     key(11, 0); /* 123: one "2" per press */
     for (int i = 0; i <= TASK_LENGTH; ++i)
@@ -218,7 +218,7 @@ static void tasks(const char *path)
     assert(app.task_count == 1 && strlen(app.tasks[0].text) == TASK_LENGTH);
     /* 140 "2"s (10 px each) wrap onto five 335 px lines, so the options
      * rows start at y=34+5*22+8=152: Mark done 152..183, Delete 184..215. */
-    tap(50, 138, 0);
+    tap(50, 170, 0);
     tap(50, 42, 0);
     assert(app.screen == TASK_ACTIONS);
     tap(50, 168, 0);
@@ -233,9 +233,9 @@ static void expanded_utilities(void)
 {
     /* Unfinished categories are hidden on HOME but implementation stays
      * testable by entering their screens directly. */
-    tap(50,203,0);
-    assert(app.screen==HOME);
     tap(50,235,0);
+    assert(app.screen==HOME);
+    tap(50,267,0);
     assert(app.screen==HOME);
     app.screen=TIME_GROUP;
     app.focus=0;
@@ -251,9 +251,8 @@ static void expanded_utilities(void)
     back();assert(app.screen==TIME_GROUP);
     tap(50,114,7000);
     assert(app.screen==COUNTDOWN);
-    tap(50,212,7000);
+    tap(280,240,7000);
     assert(app.extra.countdown.running);
-    back();assert(app.screen==TIME_GROUP);
     back();assert(app.screen==HOME);
 
     app.screen=TOOL_GROUP;
@@ -325,7 +324,7 @@ static void metronome_classic(void)
 
 static void calculator(void)
 {
-    tap(50, 170, 0); /* Calculator row: y=154..185 */
+    tap(50, 202, 0); /* Calculator row: y=154..185 */
     tap(50, 105, 0);  /* 7 */
     tap(300, 105, 0); /* / */
     tap(50, 180, 0);  /* 1 */

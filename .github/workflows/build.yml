@@ -38,9 +38,9 @@ jobs:
       - name: Verify install package
         run: |
           unzip -t dist/.utilities-app.zip
-          unzip -p dist/.utilities-app.zip .utilities-app/q2app | grep -Fx 'game=1'
+          unzip -p dist/.utilities-app.zip .utilities-app/q2app | grep -Fx 'name=Utilities'
           unzip -p dist/.utilities-app.zip .utilities-app/q2app | grep -Fx 'row=library'
-          test "$(unzip -Z1 dist/.utilities-app.zip | sort)" = "$(printf '%s\n' .utilities-app/q2-utilities-app .utilities-app/q2app | sort)"
+          test "$(unzip -Z1 dist/.utilities-app.zip | sort)" = "$(printf '%s\n' .utilities-app/q2-utilities-app .utilities-app/q2app .utilities-app/run | sort)"
           file dist/.utilities-app/q2-utilities-app | grep -E 'ELF 32-bit LSB.*MIPS'
       - uses: actions/upload-artifact@v6
         with:
