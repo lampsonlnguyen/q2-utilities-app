@@ -425,6 +425,7 @@ static void make_layout(const struct app *app, struct layout *layout)
             button(layout,0,26+i*36,WIDTH,36,order[i],titles[order[i]]);
         break;
     }
+    case RINGTONE: break;
     case COUNTDOWN:
         for (int i=0;i<3;i++) button(layout,12+i*117,45,117,146,i,"");
         button(layout,20,218,150,54,3,"Cancel");
@@ -988,8 +989,47 @@ static void timer_input(struct app *app,const char *message,int64_t now)
     }
 }
 
+
+static void clip_input(struct app *app,const char *message,int64_t now)
+{
+    int travel,x,y; char phase;
+    int max=app->clip_duration>10?app->clip_duration-10:0;
+    if(sscanf(message,"w %d",&travel)==1) {
+        if(now-app->wheel_at>=WHEEL_IDLE_MS) app->wheel=0;
+        app->wheel_at=now;
+        int64_t fine=(int64_t)travel*WHEEL_FINE+app->wheel;
+        int step=(int)(fine/app->wheel_units);
+        app->wheel=(int)(fine%app->wheel_units);
+        if(app->clip_focus==0) {
+            int n=app->clip_start-step;
+            app->clip_start=n<0?0:n>max?max:n;
+        } else {
+            int n=app->clip_focus-step;
+            app->clip_focus=n<1?1:n>2?2:n;
+        }
+    } else if(sscanf(message,"k %c %d",&phase,&x)==2 && phase=='u') {
+        if(x==RETURN_KEY) {
+            if(app->clip_focus) app->clip_focus=0;
+            else app->quit=true;
+        } else if(x==CENTRE_KEY) {
+            if(!app->clip_focus) app->clip_focus=1;
+            else if(max||app->clip_duration==10) app->clip_request=app->clip_focus;
+        }
+    } else if(sscanf(message,"t %c %d %d",&phase,&x,&y)==3) {
+        if((phase=='d'||phase=='m'||phase=='u') && y>=85&&y<=205) {
+            int n=(x-15)*app->clip_duration/345-5;
+            app->clip_start=n<0?0:n>max?max:n;
+            app->clip_focus=0;
+        } else if(phase=='u'&&y>=251&&y<=303&&app->clip_duration>=10) {
+            app->clip_focus=x<WIDTH/2?1:2;
+            app->clip_request=app->clip_focus;
+        }
+    }
+}
+
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today)
 {
+    if(app->screen==RINGTONE) { clip_input(app,message,now); return; }
     if(app->screen==COUNTDOWN) { timer_input(app,message,now); return; }
     int travel;
     if (sscanf(message, "w %d", &travel) == 1) {
@@ -2083,6 +2123,41 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
     }
 }
 
+
+/* Rasterize the timer's numerals at their final size, using 4x4 coverage.
+ * A rounded segment face keeps strokes clean even on the small panel. */
+static void timer_digits(uint32_t *pixels,unsigned stride,int y,const char *value,uint32_t color)
+{
+    static const unsigned masks[]={63,6,91,79,102,109,125,7,127,111};
+    static const int seg[7][4]={{8,5,28,5},{31,8,31,29},{31,35,31,56},
+        {8,59,28,59},{5,35,5,56},{5,8,5,29},{8,32,28,32}};
+    int x=(WIDTH-((int)strlen(value)*40-4))/2;
+    for(const char *s=value;*s;s++,x+=40) {
+        unsigned mask=*s>='0'&&*s<='9'?masks[*s-'0']:0;
+        for(int r=0;r<65;r++) for(int c=0;c<36;c++) {
+            unsigned hits=0;
+            for(int sy=0;sy<4;sy++) for(int sx=0;sx<4;sx++) {
+                int px=c*8+sx*2+1,py=r*8+sy*2+1;
+                bool inside=false;
+                if(*s==':') {
+                    int dx=px-18*8,dy=py-(r<32?21:43)*8;
+                    inside=dx*dx+dy*dy<=32*32;
+                } else for(int k=0;k<7&&!inside;k++) if(mask&(1u<<k)) {
+                    int x1=seg[k][0]*8,x2=seg[k][2]*8,y1=seg[k][1]*8,y2=seg[k][3]*8;
+                    int dx=px-(px<x1?x1:px>x2?x2:px);
+                    int dy=py-(py<y1?y1:py>y2?y2:py);
+                    inside=dx*dx+dy*dy<=25*25;
+                }
+                hits+=inside;
+            }
+            if(hits) {
+                uint32_t *dst=&pixels[(x+c)*stride+HEIGHT-1-y-r];
+                *dst=0xff000000u|blend(*dst,color,hits*255/16);
+            }
+        }
+    }
+}
+
 static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t now)
 {
     CountdownState *t=&app->extra.countdown;
@@ -2096,7 +2171,7 @@ static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t 
         int sec=(int)((rem+999)/1000);
         char value[24];
         snprintf(value,sizeof value,"%02d:%02d:%02d",sec/3600,sec/60%60,sec%60);
-        large_text(pixels,stride,58,value,3,app->timer_alarm?SCHEME.accent_red:ACCENT,true);
+        timer_digits(pixels,stride,58,value,app->timer_alarm?SCHEME.accent_red:ACCENT);
         small_centered(pixels,stride,169,app->timer_alarm?"TIME IS UP":t->running?"TIMER RUNNING":"PAUSED",INK);
         progress_bar(pixels,stride,rem,t->preset_ms);
     } else {
@@ -2139,6 +2214,43 @@ static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t 
     }
 }
 
+
+static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
+{
+    char label[96],title[80];
+    fit_text(title,sizeof title,app->clip_title,WIDTH-24,false);
+    centered(pixels,stride,0,39,WIDTH,title,INK);
+    if(app->clip_duration<10) {
+        small_centered(pixels,stride,75,"Choose a readable song of at least 10s",MUTED);
+        return;
+    }
+    snprintf(label,sizeof label,"%d:%02d",app->clip_duration/60,app->clip_duration%60);
+    small_centered(pixels,stride,65,label,MUTED);
+    int left=15+(int)((int64_t)345*app->clip_start/app->clip_duration);
+    int right=15+(int)((int64_t)345*(app->clip_start+10)/app->clip_duration);
+    if(right-left<3) right=left+3;
+    if(right>360) right=360;
+    fill(pixels,stride,left,87,right-left,112,blend(BG,ACCENT,70));
+    for(int i=0;i<80;i++) {
+        int x=15+i*345/80;
+        int height=2+app->clip_wave[i]*100/255;
+        fill(pixels,stride,x,143-height/2,3,height,x>=left&&x<right?ACCENT:MUTED);
+    }
+    fill(pixels,stride,left,87,2,112,ACCENT);
+    fill(pixels,stride,right-2,87,2,112,ACCENT);
+    snprintf(label,sizeof label,"Start %d:%02d",app->clip_start/60,app->clip_start%60);
+    draw_text_fitted(pixels,stride,15,209,160,label,INK);
+    snprintf(label,sizeof label,"End %d:%02d",(app->clip_start+10)/60,(app->clip_start+10)%60);
+    draw_text_fitted(pixels,stride,210,209,150,label,INK);
+    small_centered(pixels,stride,233,app->clip_status<0?"Audio operation failed":app->clip_status==1?"Preview requested":"10 seconds",ACCENT);
+    for(int i=0;i<2;i++) {
+        int x=15+i*177;
+        fill(pixels,stride,x,253,168,43,i?ACCENT:SCHEME.fill);
+        if(app->clip_focus==i+1) outline(pixels,stride,x,253,168,43,INK);
+        centered(pixels,stride,x,263,168,i?"Save":"Preview",i?0xffffffu:INK);
+    }
+}
+
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, time_t utc, const struct tm *today)
 {
     extra_tick(&app->extra,now);
@@ -2158,6 +2270,8 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         snprintf(title, sizeof title, "%s %d", months[app->month], app->year);
     else if (app->screen == WC_DETAIL)
         snprintf(title, sizeof title, "%s", WC_CITIES[app->wc_selected].name);
+    else if(app->screen==RINGTONE)
+        snprintf(title,sizeof title,"Edit Alarm Sound");
     else
         snprintf(title, sizeof title, "%s", titles[app->screen]);
     if (app->screen == EDIT_TASK && app->draft[0])
@@ -2167,6 +2281,7 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         upper(title);
     centered(pixels, stride, 0, 3, WIDTH, title, INK);
     char value[64];
+    if(app->screen==RINGTONE) { draw_clip(app,pixels,stride); return; }
     if(app->screen==COUNTDOWN) { draw_timer(app,pixels,stride,now); return; }
 
     switch (app->screen) {
@@ -2288,7 +2403,7 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
     case WC_DETAIL:
         draw_world_clock_detail(app, pixels, stride, utc);
         break;
-    case HOME: case TIME_GROUP: case TOOL_GROUP:
+    case RINGTONE: case HOME: case TIME_GROUP: case TOOL_GROUP:
         break;
     }
 

@@ -35,6 +35,7 @@ static const struct { const char *uri, *title; enum screen screen; } tools[] = {
 
 bool menu_screen(const char *uri, enum screen *out)
 {
+    if(!strcmp(uri,"ringtone")) { *out=RINGTONE; return true; }
     for (unsigned i = 0; i < sizeof tools / sizeof tools[0]; ++i)
         if (!strcmp(uri, tools[i].uri)) {
             *out = tools[i].screen;
@@ -203,6 +204,53 @@ static bool play_path(const char *song)
     snprintf(line,sizeof line,"%ld%09ld %s\n",(long)ts.tv_sec,ts.tv_nsec,QUEUE);
     return put(PLAY,line);
 }
+
+bool ringtone_load(struct app *app)
+{
+    char song[PATH_SIZE];
+    if(!selected_song(song,sizeof song)) return false;
+    snprintf(app->clip_title,sizeof app->clip_title,"%.79s",base(song));
+    int duration=song_length(song);
+    if(duration<10||duration>86400) return false;
+    app->clip_duration=duration;
+    app->clip_start=saved_offset();
+    if(app->clip_start>duration-10) app->clip_start=duration-10;
+    /* Downsample on-device to 1 kHz mono PCM; stream into 80 peak bins.
+     * The temporary file avoids retaining decoded audio in RAM. */
+    const char *raw="/tmp/q2-utilities-wave.raw";
+    char *args[]={"ffmpeg","-nostdin","-v","error","-y","-i",song,
+        "-map","0:a:0","-vn","-ac","1","-ar","1000","-f","s16le",(char *)raw,NULL};
+    if(ffmpeg(args,NULL,0)!=0) { unlink(raw); app->clip_status=-1; return true; }
+    FILE *f=fopen(raw,"rb");
+    if(f) {
+        unsigned char samples[2048]; size_t n; uint64_t pos=0;
+        unsigned peaks[80]={0},peak=1;
+        while((n=fread(samples,1,sizeof samples,f))>0) {
+            for(size_t i=0;i+1<n;i+=2,pos++) {
+                unsigned bin=(unsigned)(pos*80/((uint64_t)duration*1000));
+                if(bin>=80) bin=79;
+                int v=(int16_t)(samples[i]|((unsigned)samples[i+1]<<8));
+                unsigned mag=(unsigned)(v<0?-v:v);
+                if(mag>peaks[bin]) peaks[bin]=mag;
+                if(mag>peak) peak=mag;
+            }
+        }
+        fclose(f);
+        for(int i=0;i<80;i++) app->clip_wave[i]=(unsigned char)(peaks[i]*255/peak);
+    } else app->clip_status=-1;
+    unlink(raw);
+    return true;
+}
+bool ringtone_apply(int start,bool save)
+{
+    char song[PATH_SIZE],value[24];
+    if(!selected_song(song,sizeof song)) return false;
+    if(!make_clip(song,start,save?CLIP:PREVIEW)) return false;
+    if(!save) return play_path(PREVIEW);
+    snprintf(value,sizeof value,"%d",start);
+    return put(OFFSET,value);
+}
+
 bool alarm_play(void)
 {
     char song[PATH_SIZE];
@@ -274,7 +322,7 @@ static void sound_menu(FILE *out,const char *id)
     header(out,id,"","");
     row(out,"info","","Selected song",selected_song(path,sizeof path)?base(path):"None","");
     row(out,"list","folder","Choose from Library","",CARD);
-    row(out,"list","clip","Edit 10-second clip","","");
+    row(out,"screen","ringtone","Edit 10-second clip","","");
     row(out,"action","preview","Preview alarm","","");
     row(out,"action","clear","Clear selection","","");
 }

@@ -123,6 +123,7 @@ int main(int argc, char **argv)
     app_init(&app, TASK_FILE);
     if (uri) {
         app.screen = selected;
+        if(selected==RINGTONE) ringtone_load(&app);
         if (selected == CALENDAR) {
             time_t date = time(NULL);
             struct tm today;
@@ -192,6 +193,13 @@ int main(int argc, char **argv)
                 app_input(&app, msg, monotonic_ms(), &today);
                 if(selected==COUNTDOWN && (was_running!=app.extra.countdown.running || old_due!=app.extra.countdown.due_ms))
                     alarm_deadline(app.extra.countdown.running?app.extra.countdown.due_ms:0);
+                if(selected==RINGTONE && app.clip_request) {
+                    bool save=app.clip_request==2;
+                    bool ok=ringtone_apply(app.clip_start,save);
+                    app.clip_request=0;
+                    app.clip_status=ok?1:-1;
+                    if(ok&&save) app.quit=true;
+                }
                 if (uri && app.screen == HOME)
                     app.quit = true;
             }

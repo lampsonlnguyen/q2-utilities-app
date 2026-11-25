@@ -5,5 +5,7 @@
 bool menu_screen(const char *uri, enum screen *out);
 int menu_serve(void);
 bool alarm_play(void);
+bool ringtone_load(struct app *app);
+bool ringtone_apply(int start,bool save);
 void alarm_deadline(int64_t due);
 #endif

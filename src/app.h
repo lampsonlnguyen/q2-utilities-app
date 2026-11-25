@@ -11,7 +11,7 @@ enum { WIDTH = 375, HEIGHT = 320, TASK_LIMIT = 32, TASK_LENGTH = 140, LAP_LIMIT 
 
 enum screen { HOME, STOPWATCH, CALENDAR, TODO, CALCULATOR, WORLD_CLOCK, WC_DETAIL, EDIT_TASK, TASK_ACTIONS, WC_MAP,
               TIME_GROUP, TOOL_GROUP, POMODORO, METRONOME, COUNTDOWN,
-              CONVERTER, RANDOMIZER, DATE_CALC, ENGINEERING, EVENT_COUNTER };
+              CONVERTER, RANDOMIZER, DATE_CALC, ENGINEERING, EVENT_COUNTER, RINGTONE };
 
 struct task {
     bool done;
@@ -46,6 +46,9 @@ struct app {
     char number[32];
     bool timer_edit, timer_alarm, timer_started;
     int timer_touch_y;
+    int clip_start, clip_duration, clip_focus, clip_request, clip_status;
+    unsigned char clip_wave[80];
+    char clip_title[80];
     ExtraTools extra;
 };
 
