@@ -41,3 +41,8 @@ __asm__(".set noreorder\n.globl __start\n__start:\n"
  * gives it old-layout stdio FILEs, which crash exit() */
 const int _IO_stdin_used = 0x20001;
 
+/* glibc 2.28 exports __xstat; the usual stat wrapper lives in
+ * libc_nonshared.a, which the Q2 link deliberately does not use.
+ * Match DiamondBond/q2-mixtape's MIPS startup compatibility wrapper. */
+int __xstat(int, const char *, struct stat *);
+int stat(const char *p, struct stat *s) { return __xstat(_STAT_VER, p, s); }
