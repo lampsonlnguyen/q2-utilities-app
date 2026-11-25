@@ -20,6 +20,21 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 
+/* _GNU_SOURCE enables statx but newer build headers also redirect parsing
+ * to C23 symbols unavailable in the firmware's glibc 2.28. Bind explicitly
+ * to the older ABI on Q2. All current formats have C99 semantics. */
+#if defined(__mips__) && defined(__GLIBC__)
+extern int q2_sscanf(const char *, const char *, ...) __asm__("__isoc99_sscanf")
+    __attribute__((format(scanf, 2, 3)));
+extern int q2_fscanf(FILE *, const char *, ...) __asm__("__isoc99_fscanf")
+    __attribute__((format(scanf, 2, 3)));
+extern long q2_strtol(const char *, char **, int) __asm__("strtol");
+#else
+#define q2_sscanf sscanf
+#define q2_fscanf fscanf
+#define q2_strtol strtol
+#endif
+
 #define SOCK "/tmp/q2-utilities-app.browse.sock"
 static volatile sig_atomic_t stopped;
 static void stop_menu(int sig) { (void)sig; stopped = 1; }
@@ -173,7 +188,7 @@ static int song_length(const char *path)
     ffmpeg(args,log,sizeof log);
     const char *d=strstr(log,"Duration: ");
     int h,m; double s;
-    if(!d||sscanf(d+10,"%d:%d:%lf",&h,&m,&s)!=3) return 0;
+    if(!d||q2_sscanf(d+10,"%d:%d:%lf",&h,&m,&s)!=3) return 0;
     return h*3600+m*60+(int)s;
 }
 static bool make_clip(const char *song,int start,const char *dest)
@@ -194,7 +209,7 @@ static int saved_offset(void)
 {
     FILE *f=fopen(OFFSET,"r");
     int n=0;
-    if(f) { if(fscanf(f,"%d",&n)!=1) n=0; fclose(f); }
+    if(f) { if(q2_fscanf(f,"%d",&n)!=1) n=0; fclose(f); }
     return n<0?0:n;
 }
 static bool play_path(const char *song)
@@ -273,7 +288,7 @@ static void alarm_poll(void)
     FILE *f=fopen(DEADLINE,"r");
     if(!f) { unlink(STATE); return; }
     long long due=0;
-    int ok=fscanf(f,"%lld",&due);
+    int ok=q2_fscanf(f,"%lld",&due);
     fclose(f);
     if(ok!=1 || due<=0) { unlink(DEADLINE); unlink(STATE); return; }
     struct timespec ts;
@@ -300,7 +315,7 @@ static bool decode(char *s)
         if(*p=='%') {
             if(!p[1]||!p[2]) return false;
             char hex[3]={p[1],p[2],0},*end;
-            long n=strtol(hex,&end,16);
+            long n=q2_strtol(hex,&end,16);
             if(*end||n<=0||n>255) return false;
             *w++=(char)n; p+=2;
         } else *w++=*p;
@@ -404,7 +419,7 @@ static void reply(int fd)
     }
     request[used] = 0;
     if (strncmp(request, "Q2SPOT/1\n", 9) ||
-        sscanf(request + 9, "%23[0-9]\t%23[^\t\r\n]", id, op) != 2)
+        q2_sscanf(request + 9, "%23[0-9]\t%23[^\t\r\n]", id, op) != 2)
         return;
     FILE *out = fdopen(dup(fd), "w");
     if (!out) return;
@@ -432,7 +447,7 @@ static void reply(int fd)
         if(!strcmp(op,"clipseek")) {
             char *value=arg?strchr(arg+1,'\t'):NULL;
             int m=0,s=0;
-            if(value && sscanf(value+1,"%d:%d",&m,&s)==2 && m>=0 && m<=100000 && s>=0 && s<60)
+            if(value && q2_sscanf(value+1,"%d:%d",&m,&s)==2 && m>=0 && m<=100000 && s>=0 && s<60)
                 start=m*60+s;
         } else if(!strcmp(op,"clipback")) start-=10;
         else if(!strcmp(op,"clipnext")) start+=10;
