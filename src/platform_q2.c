@@ -186,8 +186,12 @@ int main(int argc, char **argv)
             char msg[64];
             ssize_t n = recv(sock, msg, sizeof msg - 1, MSG_DONTWAIT);
             if (n > 0) {
+                bool was_running=app.extra.countdown.running;
+                int64_t old_due=app.extra.countdown.due_ms;
                 msg[n] = '\0';
                 app_input(&app, msg, monotonic_ms(), &today);
+                if(selected==COUNTDOWN && (was_running!=app.extra.countdown.running || old_due!=app.extra.countdown.due_ms))
+                    alarm_deadline(app.extra.countdown.running?app.extra.countdown.due_ms:0);
                 if (uri && app.screen == HOME)
                     app.quit = true;
             }

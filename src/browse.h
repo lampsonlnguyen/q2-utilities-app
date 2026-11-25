@@ -4,4 +4,6 @@
 #include "app.h"
 bool menu_screen(const char *uri, enum screen *out);
 int menu_serve(void);
+bool alarm_play(void);
+void alarm_deadline(int64_t due);
 #endif
