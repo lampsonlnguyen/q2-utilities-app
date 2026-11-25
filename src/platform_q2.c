@@ -3,6 +3,7 @@
  * which follows q2-fidget (Buddy).
  */
 #include "app.h"
+#include "browse.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -10,6 +11,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -73,8 +75,14 @@ static void load_config(struct app *app, int hour)
     app_wheel_config(app, config);
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    if (argc > 1 && !strcmp(argv[1], "--menu"))
+        return menu_serve();
+    const char *uri = getenv("Q2_URI");
+    enum screen selected = HOME;
+    if (uri && !menu_screen(uri, &selected))
+        return 1;
     unlink(ERROR_FILE);
     struct sigaction action = { .sa_handler = stop };
     sigemptyset(&action.sa_mask);
@@ -113,6 +121,17 @@ int main(void)
         goto unmap;
     struct app app;
     app_init(&app, TASK_FILE);
+    if (uri) {
+        app.screen = selected;
+        if (selected == CALENDAR) {
+            time_t date = time(NULL);
+            struct tm today;
+            if (localtime_r(&date, &today)) {
+                app.year = today.tm_year + 1900;
+                app.month = today.tm_mon + 1;
+            }
+        }
+    }
 
     int theme_hour = -1;
     error = "Q2 Pod input socket stopped responding";
@@ -164,6 +183,8 @@ int main(void)
             if (n > 0) {
                 msg[n] = '\0';
                 app_input(&app, msg, monotonic_ms(), &today);
+                if (uri && app.screen == HOME)
+                    app.quit = true;
             }
         }
     }

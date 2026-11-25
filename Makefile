@@ -3,7 +3,7 @@ Q2_CC ?= clang
 Q2_LD ?= ld.lld
 CFLAGS ?= -O2 -Wall -Wextra -Werror
 Q2_FLAGS = --target=mipsel-linux-gnu --sysroot="$(SYSROOT)" -march=mips32r2 -mabi=32 -mfp64 -mnan=2008 -mabs=2008
-Q2_OBJECTS = build/q2/app.o build/q2/platform_q2.o build/q2/crt-q2.o build/q2/q2pod_scheme.o build/q2/worldclock.o build/q2/extra_tools.o
+Q2_OBJECTS = build/q2/app.o build/q2/platform_q2.o build/q2/browse.o build/q2/crt-q2.o build/q2/q2pod_scheme.o build/q2/worldclock.o build/q2/extra_tools.o
 CARD = dist/.utilities-app
 
 all: dist/.utilities-app.zip
@@ -16,7 +16,7 @@ check-sysroot:
 		echo 'Q2 sysroot is incomplete at $(SYSROOT).' >&2; \
 		echo 'Run: bash tools/mksysroot.sh "Q2 Firmware V1.36.zip" "$(SYSROOT)"' >&2; exit 1; }
 
-build/q2/%.o: src/%.c src/app.h src/font.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h | check-sysroot
+build/q2/%.o: src/%.c src/app.h src/font.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/browse.h | check-sysroot
 	mkdir -p $(@D)
 	$(Q2_CC) $(Q2_FLAGS) $(CFLAGS) -std=gnu11 -c $< -o $@
 
@@ -30,8 +30,13 @@ $(CARD)/q2app: q2app
 	mkdir -p $(@D)
 	cp $< $@
 
-dist/.utilities-app.zip: $(CARD)/q2-utilities-app $(CARD)/q2app
-	cd dist && rm -f .utilities-app.zip && zip -q .utilities-app.zip .utilities-app/q2app .utilities-app/q2-utilities-app
+$(CARD)/run: run
+	mkdir -p $(@D)
+	cp $< $@
+	chmod 755 $@
+
+dist/.utilities-app.zip: $(CARD)/q2-utilities-app $(CARD)/q2app $(CARD)/run
+	cd dist && rm -f .utilities-app.zip && zip -q .utilities-app.zip .utilities-app/q2app .utilities-app/q2-utilities-app .utilities-app/run
 
 build/host/check: tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c src/extra_tools.c src/app.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/font.h
 	mkdir -p $(@D)
