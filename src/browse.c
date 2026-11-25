@@ -143,9 +143,13 @@ static int ffmpeg(char *const args[], char *log, size_t size)
     close(pipefd[1]);
     if(child<0) { close(pipefd[0]); return -1; }
     size_t used=0;
-    int status=0, elapsed=0;
+    int status=0;
+    struct timespec begin, current;
+    clock_gettime(CLOCK_MONOTONIC,&begin);
     bool exited=false;
-    while(elapsed<8000 && !stopped) {
+    while(!stopped) {
+        clock_gettime(CLOCK_MONOTONIC,&current);
+        if(current.tv_sec-begin.tv_sec>=120) break;
         struct pollfd p={.fd=pipefd[0],.events=POLLIN};
         if(poll(&p,1,100)>0) {
             char buf[512];
@@ -156,7 +160,6 @@ static int ffmpeg(char *const args[], char *log, size_t size)
             }
         }
         if(waitpid(child,&status,WNOHANG)==child) { exited=true; break; }
-        elapsed+=100;
     }
     if(!exited) { kill(child,SIGKILL); waitpid(child,&status,0); }
     if(log && size) log[used]=0;

@@ -750,6 +750,7 @@ static void activate(struct app *app, int code, int64_t now, const struct tm *to
     case TASK_ACTIONS: task_action(app, code); break;
     case EDIT_TASK: edit_task(app, code, now); break;
     case CALCULATOR: calculate(app, code); break;
+    case RINGTONE: break; /* Dedicated input handler. */
     }
 }
 
