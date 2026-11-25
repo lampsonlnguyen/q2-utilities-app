@@ -1,0 +1,21 @@
+#!/bin/sh
+# Run the menu service from RAM so USB storage can unmount the card.
+pid=/tmp/q2-utilities-app
+if [ "$1" != --service ]; then
+    [ -f "$pid" ] && kill -0 "$(cat "$pid")" 2>/dev/null && exit 0
+    dir=$(cd "$(dirname "$0")" && pwd)
+    cp "$dir/q2-utilities-app" /tmp/q2-utilities-app.bin || exit 1
+    chmod 755 /tmp/q2-utilities-app.bin || exit 1
+    cp "$0" /tmp/q2-utilities-app.run || exit 1
+    cd /tmp
+    exec /bin/sh /tmp/q2-utilities-app.run --service
+fi
+(
+    child=
+    trap '[ -z "$child" ] || { kill -TERM "$child" 2>/dev/null; wait "$child"; }; rm -f "$pid" /tmp/q2-utilities-app.bin /tmp/q2-utilities-app.run /tmp/q2-utilities-app.browse.sock; exit 0' TERM INT
+    /tmp/q2-utilities-app.bin --menu &
+    child=$!
+    wait "$child"
+    rm -f "$pid" /tmp/q2-utilities-app.bin /tmp/q2-utilities-app.run /tmp/q2-utilities-app.browse.sock
+) </dev/null >/dev/null 2>&1 &
+echo $! > "$pid"
