@@ -427,8 +427,8 @@ static void make_layout(const struct app *app, struct layout *layout)
     }
     case COUNTDOWN:
         for (int i=0;i<3;i++) button(layout,12+i*117,45,117,146,i,"");
-        button(layout,20,215,150,52,3,"Cancel");
-        button(layout,205,215,150,52,4,app->extra.countdown.running?"Pause":"Start");
+        button(layout,20,218,150,54,3,"Cancel");
+        button(layout,205,218,150,54,4,app->extra.countdown.running?"Pause":"Start");
         break;
     case POMODORO: case METRONOME: case CONVERTER:
     case RANDOMIZER: case DATE_CALC: case ENGINEERING: case EVENT_COUNTER: {
@@ -917,7 +917,7 @@ static void timer_action(struct app *app, int code, int64_t now)
 {
     CountdownState *t=&app->extra.countdown;
     if(code<3) {
-        if(!t->running) app->timer_edit=!app->timer_edit;
+        if(!t->running && !app->timer_started && !app->timer_alarm) app->timer_edit=!app->timer_edit;
         return;
     }
     app->timer_edit=false;
@@ -937,6 +937,7 @@ static void timer_action(struct app *app, int code, int64_t now)
         t->due_ms=now+t->remaining_ms;
         t->running=true;
         app->timer_started=true;
+        app->focus=4;
     }
 }
 
@@ -953,7 +954,7 @@ static void timer_input(struct app *app,const char *message,int64_t now)
         app->wheel=(int)(fine%app->wheel_units);
         if(app->timer_edit) timer_adjust(app,app->focus,-step);
         else {
-            int min=t->running||app->timer_alarm?3:0;
+            int min=app->timer_started||app->timer_alarm?3:0;
             int next=app->focus-step;
             app->focus=next<min?min:next>4?4:next;
         }
@@ -973,7 +974,7 @@ static void timer_input(struct app *app,const char *message,int64_t now)
             int field=app->touch_button;
             app->touch_button=-1;
             if(field<0) return;
-            if(field<3 && !t->running && !app->timer_alarm) {
+            if(field<3 && !app->timer_started && !app->timer_alarm) {
                 app->focus=field;
                 int dy=app->timer_touch_y-b;
                 if(dy>12||dy<-12) timer_adjust(app,field,dy/12);
@@ -2086,14 +2087,18 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
 static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t now)
 {
     CountdownState *t=&app->extra.countdown;
-    if(app->timer_started && !t->running && t->remaining_ms==0) app->timer_alarm=true;
+    if(app->timer_started && !t->running && t->remaining_ms==0) {
+        app->timer_alarm=true;
+        app->timer_edit=false;
+        if(app->focus<3) app->focus=4;
+    }
     if(app->timer_alarm || t->running || app->timer_started) {
         int64_t rem=tool_remaining(t->due_ms,t->remaining_ms,now,t->running);
         int sec=(int)((rem+999)/1000);
         char value[24];
         snprintf(value,sizeof value,"%02d:%02d:%02d",sec/3600,sec/60%60,sec%60);
-        large_text(pixels,stride,70,value,3,app->timer_alarm?SCHEME.accent_red:ACCENT,true);
-        small_centered(pixels,stride,145,app->timer_alarm?"TIME IS UP":t->running?"TIMER RUNNING":"PAUSED",INK);
+        large_text(pixels,stride,58,value,3,app->timer_alarm?SCHEME.accent_red:ACCENT,true);
+        small_centered(pixels,stride,169,app->timer_alarm?"TIME IS UP":t->running?"TIMER RUNNING":"PAUSED",INK);
         progress_bar(pixels,stride,rem,t->preset_ms);
     } else {
         int sec=(int)(t->remaining_ms/1000);
@@ -2116,15 +2121,22 @@ static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t 
                 }
             }
         }
-        small_centered(pixels,stride,185,app->timer_edit?"Wheel adjusts  /  Centre confirms":"Centre edits  /  Swipe adjusts",MUTED);
+        small_centered(pixels,stride,190,app->timer_edit?"Wheel adjusts":"Centre edits / Swipe",MUTED);
     }
     const char *labels[]={app->timer_alarm?"Dismiss":"Cancel",app->timer_alarm?"Done":t->running?"Pause":app->timer_started?"Resume":"Start"};
     for(int i=0;i<2;i++) {
         int x=i?205:20;
         uint32_t color=i?ACCENT:SCHEME.fill;
-        fill(pixels,stride,x,215,150,52,color);
-        if(app->focus==i+3) outline(pixels,stride,x,215,150,52,INK);
-        centered(pixels,stride,x,230,150,labels[i],i?0xffffffu:INK);
+        /* Small rounded corners, without allocating another surface. */
+        for(int row=0;row<54;row++) {
+            int inset=row<6?6-row:row>=48?row-47:0;
+            fill(pixels,stride,x+inset,218+row,150-2*inset,1,color);
+        }
+        if(app->focus==i+3) {
+            fill(pixels,stride,x+9,218,132,2,INK);
+            fill(pixels,stride,x+9,270,132,2,INK);
+        }
+        centered(pixels,stride,x,234,150,labels[i],i?0xffffffu:INK);
     }
 }
 
