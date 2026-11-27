@@ -981,8 +981,8 @@ static void timer_input(struct app *app,const char *message,int64_t now)
                 app->focus=field;
                 int dy=app->timer_touch_y-b;
                 if(dy>12||dy<-12) timer_adjust(app,field,dy/12);
-                else if(index==field && b<94) timer_adjust(app,field,-1);
-                else if(index==field && b>142) timer_adjust(app,field,1);
+                else if(index==field && b<77) timer_adjust(app,field,-1);
+                else if(index==field && b>153) timer_adjust(app,field,1);
                 else if(index==field) app->timer_edit=!app->timer_edit;
             } else if(field>=3 && index==field) {
                 app->focus=field;
@@ -2206,38 +2206,8 @@ static void stopwatch_digits(uint32_t *pixels, unsigned stride, int y,
     }
 }
 
-static void timer_digits(uint32_t *pixels,unsigned stride,int y,const char *value,uint32_t color)
-{
-    static const unsigned masks[]={63,6,91,79,102,109,125,7,127,111};
-    static const int seg[7][4]={{8,5,28,5},{31,8,31,29},{31,35,31,56},
-        {8,59,28,59},{5,35,5,56},{5,8,5,29},{8,32,28,32}};
-    int x=(WIDTH-((int)strlen(value)*40-4))/2;
-    for(const char *s=value;*s;s++,x+=40) {
-        unsigned mask=*s>='0'&&*s<='9'?masks[*s-'0']:0;
-        for(int r=0;r<65;r++) for(int c=0;c<36;c++) {
-            unsigned hits=0;
-            for(int sy=0;sy<4;sy++) for(int sx=0;sx<4;sx++) {
-                int px=c*8+sx*2+1,py=r*8+sy*2+1;
-                bool inside=false;
-                if(*s==':') {
-                    int dx=px-18*8,dy=py-(r<32?21:43)*8;
-                    inside=dx*dx+dy*dy<=32*32;
-                } else for(int k=0;k<7&&!inside;k++) if(mask&(1u<<k)) {
-                    int x1=seg[k][0]*8,x2=seg[k][2]*8,y1=seg[k][1]*8,y2=seg[k][3]*8;
-                    int dx=px-(px<x1?x1:px>x2?x2:px);
-                    int dy=py-(py<y1?y1:py>y2?y2:py);
-                    inside=dx*dx+dy*dy<=25*25;
-                }
-                hits+=inside;
-            }
-            if(hits) {
-                uint32_t *dst=&pixels[(x+c)*stride+HEIGHT-1-y-r];
-                *dst=0xff000000u|blend(*dst,color,hits*255/16);
-            }
-        }
-    }
-}
 
+static void clip_round(uint32_t *pixels,unsigned stride,int x,int y,int w,int h,int radius,uint32_t color);
 static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t now)
 {
     CountdownState *t=&app->extra.countdown;
@@ -2246,54 +2216,65 @@ static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t 
         app->timer_edit=false;
         if(app->focus<3) app->focus=4;
     }
-    if(app->timer_alarm || t->running || app->timer_started) {
+    bool active=app->timer_alarm||t->running||app->timer_started;
+    bool light=(BG&255)>128;
+    uint32_t card=light?0xe5e7eb:0x24262a;
+    uint32_t focus=light?0xd1d9e4:0x383d45;
+    if(active) {
         int64_t rem=tool_remaining(t->due_ms,t->remaining_ms,now,t->running);
         int sec=(int)((rem+999)/1000);
         char value[24];
         snprintf(value,sizeof value,"%02d:%02d:%02d",sec/3600,sec/60%60,sec%60);
-        timer_digits(pixels,stride,58,value,app->timer_alarm?SCHEME.accent_red:ACCENT);
-        small_centered(pixels,stride,169,app->timer_alarm?"TIME IS UP":t->running?"TIMER RUNNING":"PAUSED",INK);
-        progress_bar(pixels,stride,rem,t->preset_ms);
+        stopwatch_digits(pixels,stride,63,value,app->timer_alarm?0xe85c62:INK);
+        small_centered(pixels,stride,155,app->timer_alarm?"TIME IS UP":t->running?"TIMER RUNNING":"PAUSED",MUTED);
+        int width=t->preset_ms>0?(int)(315*rem/t->preset_ms):0;
+        if(width<0) width=0;
+        if(width>315) width=315;
+        clip_round(pixels,stride,30,189,315,8,4,card);
+        if(width>=8) clip_round(pixels,stride,30,189,width,8,4,0x68b4e8);
+        else if(width>0) fill(pixels,stride,30,191,width,4,0x68b4e8);
     } else {
         int sec=(int)(t->remaining_ms/1000);
-        int parts[3]={sec/3600,sec/60%60,sec%60};
-        const char *units[]={"hr","min","sec"};
-        fill(pixels,stride,12,101,351,37,SCHEME.fill);
-        for(int i=0;i<3;i++) {
-            int x=12+i*117,limit=i==0?24:60;
-            char label[24];
-            for(int j=-2;j<=2;j++) {
-                int n=(parts[i]+j+limit)%limit;
-                if(j==0) {
-                    snprintf(label,sizeof label,"%02d %s",n,units[i]);
-                    if(app->focus==i) paint_selection(pixels,stride,x+2,101,113,37);
-                    centered(pixels,stride,x,108,117,label,app->focus==i?sel_text_color():INK);
-                } else {
-                    snprintf(label,sizeof label,"%02d",n);
-                    uint32_t color=blend(BG,MUTED,j==1||j==-1?200:90);
-                    centered(pixels,stride,x,109+j*30,117,label,color);
+        int parts[]={sec/3600,sec/60%60,sec%60};
+        const char *units[]={"hours","min","sec"};
+        for(int col=0;col<3;col++) {
+            int x=14+col*117,limit=col==0?24:60;
+            char text[8];
+            snprintf(text,sizeof text,"%02d",(parts[col]+limit-1)%limit);
+            centered(pixels,stride,x,47,113,text,MUTED);
+            clip_round(pixels,stride,x,77,113,76,13,app->focus==col?focus:card);
+            if(app->focus==col && app->timer_edit)
+                clip_round(pixels,stride,x+22,146,69,3,1,0x68b4e8);
+            snprintf(text,sizeof text,"%02d",parts[col]);
+            /* Render the two native-size coverage glyphs within each card. */
+            int start=x+(113-2*SW48_W-3)/2;
+            for(int digit=0;digit<2;digit++) {
+                const unsigned char *mask=sw48_px[text[digit]-'0'];
+                for(int row=0;row<48;row++) for(int c=0;c<SW48_W;c++) {
+                    unsigned alpha=mask[row*SW48_W+c];
+                    if(alpha) {
+                        uint32_t *dst=&pixels[(start+digit*(SW48_W+3)+c)*stride+HEIGHT-1-80-row];
+                        *dst=0xff000000u|(alpha==255?INK:blend(*dst,INK,alpha));
+                    }
                 }
             }
+            small_line(pixels,stride,x+12,132,89,units[col],INK);
+            snprintf(text,sizeof text,"%02d",(parts[col]+1)%limit);
+            centered(pixels,stride,x,160,113,text,MUTED);
         }
         small_centered(pixels,stride,190,app->timer_edit?"Wheel adjusts":"Centre edits / Swipe",MUTED);
     }
     const char *labels[]={app->timer_alarm?"Dismiss":"Cancel",app->timer_alarm?"Done":t->running?"Pause":app->timer_started?"Resume":"Start"};
-    for(int i=0;i<2;i++) {
-        int x=i?205:20;
-        uint32_t color=i?ACCENT:SCHEME.fill;
-        /* Small rounded corners, without allocating another surface. */
-        for(int row=0;row<54;row++) {
-            int inset=row<6?6-row:row>=48?row-47:0;
-            fill(pixels,stride,x+inset,218+row,150-2*inset,1,color);
-        }
-        if(app->focus==i+3) {
-            fill(pixels,stride,x+9,218,132,2,INK);
-            fill(pixels,stride,x+9,270,132,2,INK);
-        }
-        centered(pixels,stride,x,234,150,labels[i],i?0xffffffu:INK);
+    for(int k=0;k<2;k++) {
+        int x=k?205:20;
+        uint32_t bg=k?(t->running?0x742d35:0x164c2c):card;
+        uint32_t fg=k?(t->running?0xffc0c4:0x83f0a9):INK;
+        if(app->focus==k+3) clip_round(pixels,stride,x-2,216,154,58,28,light?0x63768c:0x8294a6);
+        clip_round(pixels,stride,x,218,150,54,27,bg);
+        centered(pixels,stride,x,234,150,labels[k],fg);
     }
+    if(!active) small_centered(pixels,stride,287,"Return: When Timer Ends",MUTED);
 }
-
 
 
 /* Fixed-point dial geometry: no libm or per-frame heap allocations. */
