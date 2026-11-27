@@ -208,6 +208,8 @@ static bool make_clip(const char *song,int start,int length,const char *dest,boo
     snprintf(offset,sizeof offset,"%d",start);
     snprintf(duration,sizeof duration,"%d",length);
     if(snprintf(temp,sizeof temp,"%s.tmp.%s",dest,mp3?"mp3":"wav")>=(int)sizeof temp) return false;
+    /* Some stock FFmpeg builds ship libshine instead of libmp3lame.
+     * Try both MP3 encoders, but never silently export a WAV as MP3. */
     char *args[]={"ffmpeg","-nostdin","-v","error","-y","-ss",offset,"-i",(char *)song,
                   "-t",duration,"-map","0:a:0","-vn","-ac","1","-ar","44100",
                   "-c:a",mp3?"libmp3lame":"pcm_s16le","-b:a","96k","-map_metadata","-1",temp,NULL};
@@ -215,6 +217,12 @@ static bool make_clip(const char *song,int start,int length,const char *dest,boo
     uint64_t size;
     char log[2048];
     int result=ffmpeg(args,log,sizeof log);
+    if(mp3 && result!=0 && strstr(log,"Unknown encoder")) {
+        for(unsigned i=0;args[i];i++)
+            if(!strcmp(args[i],"libmp3lame")) { args[i]="libshine"; break; }
+        unlink(temp);
+        result=ffmpeg(args,log,sizeof log);
+    }
     if(result==0 && !file_info(temp,&mode,&size) && S_ISREG(mode) && size>44 && !rename(temp,dest)) return true;
     if(error&&error_size) {
         const char *reason=strstr(log,"Unknown encoder")?"MP3 encoder unavailable":
@@ -237,7 +245,8 @@ static bool make_clip(const char *song,int start,int length,const char *dest,boo
 }static bool play_path(const char *song)
 {
     char line[128],list[PATH_SIZE+2];
-    snprintf(list,sizeof list,"%s\n",song);
+    if(access(song,R_OK)) return false;
+    if(snprintf(list,sizeof list,"%s\n",song)>=(int)sizeof list) return false;
     if(!put(QUEUE,list)) return false;
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC,&ts);
@@ -308,18 +317,18 @@ bool ringtone_apply(struct app *app,bool save)
     snprintf(value,sizeof value,"%d %d",app->clip_start,app->clip_length);
     if(!put(SONG_FILE,app->clip_path)||!put(OFFSET,value)||rename(candidate,CLIP)) {
         unlink(candidate);
+        snprintf(app->clip_error,sizeof app->clip_error,"Cannot save ringtone on SD card");
         return false;
     }
     unlink(OLD_CLIP);
+    unlink(CARD "/.utilities-app/ringtone-error.txt");
     return true;
 }
 bool alarm_play(void)
 {
-    char song[PATH_SIZE];
     if(access(CLIP,R_OK)==0) return play_path(CLIP);
     if(access(OLD_CLIP,R_OK)==0) return play_path(OLD_CLIP);
-    if(!selected_song(song,sizeof song)) return false;
-    return play_path(song);
+    return false;
 }
 void alarm_deadline(int64_t due)
 {
@@ -393,11 +402,15 @@ static void sound_menu(FILE *out,const char *id)
 {
     char path[PATH_SIZE];
     header(out,id,"","");
-    row(out,"info","","Selected song",selected_song(path,sizeof path)?base(path):"None","");
+    bool saved=access(CLIP,R_OK)==0||access(OLD_CLIP,R_OK)==0;
+    row(out,"info","","Timer alarm",saved?"Saved ringtone":"No ringtone saved","");
+    if(saved && selected_song(path,sizeof path)) row(out,"info","","Source song",base(path),"");
     row(out,"list","folder","Choose song / Make ringtone","",CARD);
-    if(selected_song(path,sizeof path)) row(out,"screen","ringtone","Edit saved ringtone","","");
-    row(out,"action","preview","Preview alarm","","");
-    row(out,"action","clear","Clear selection","","");
+    if(saved && selected_song(path,sizeof path)) row(out,"screen","ringtone","Edit saved ringtone","","");
+    if(saved) {
+        row(out,"action","preview","Preview saved ringtone","","");
+        row(out,"action","clear","Clear timer ringtone","","");
+    }
 }
 /* Read only one directory. Bound memory to 48 names, and page by a stable
  * lexicographic cursor rather than loading the entire music collection. */
@@ -465,7 +478,7 @@ static void reply(int fd)
     } else if(!strcmp(op,"sound")) {
         sound_menu(out,id);
     } else if(!strcmp(op,"preview")) {
-        header(out,id,alarm_play()?"Playing selected song":"Choose a song first","");
+        header(out,id,alarm_play()?"Playback requested":"No saved ringtone","");
     } else if(!strcmp(op,"clear")) {
         unlink(SONG_FILE); unlink(CLIP); unlink(OLD_CLIP); unlink(OFFSET);
         header(out,id,"Selection cleared","");
