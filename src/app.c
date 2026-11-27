@@ -991,43 +991,81 @@ static void timer_input(struct app *app,const char *message,int64_t now)
 }
 
 
+static int clip_clamp(int n,int lo,int hi)
+{
+    return n<lo?lo:n>hi?hi:n;
+}
+static void clip_adjust(struct app *app,int field,int target)
+{
+    int end=app->clip_start+app->clip_length;
+    if(field==0) {
+        app->clip_start=clip_clamp(target,end>30?end-30:0,end-5);
+        app->clip_length=end-app->clip_start;
+    } else {
+        int limit=app->clip_start+30;
+        if(limit>app->clip_duration) limit=app->clip_duration;
+        app->clip_length=clip_clamp(target,app->clip_start+5,limit)-app->clip_start;
+    }
+    app->clip_status=0;
+}
 static void clip_input(struct app *app,const char *message,int64_t now)
 {
     int travel,x,y; char phase;
-    int max=app->clip_duration>10?app->clip_duration-10:0;
+    if(app->clip_duration<5) {
+        if(sscanf(message,"k %c %d",&phase,&x)==2 && phase=='u' && x==RETURN_KEY) app->quit=true;
+        return;
+    }
     if(sscanf(message,"w %d",&travel)==1) {
         if(now-app->wheel_at>=WHEEL_IDLE_MS) app->wheel=0;
         app->wheel_at=now;
         int64_t fine=(int64_t)travel*WHEEL_FINE+app->wheel;
         int step=(int)(fine/app->wheel_units);
         app->wheel=(int)(fine%app->wheel_units);
-        if(app->clip_focus==0) {
-            int n=app->clip_start-step;
-            app->clip_start=n<0?0:n>max?max:n;
-        } else {
-            int n=app->clip_focus-step;
-            app->clip_focus=n<1?1:n>2?2:n;
-        }
+        if(app->clip_edit && app->clip_focus<2) {
+            int target=app->clip_start+(app->clip_focus?app->clip_length:0)-step;
+            /* At a length boundary, move the whole selection to scrub freely. */
+            if(app->clip_focus==0 && (target<app->clip_start+app->clip_length-30 || target>app->clip_start+app->clip_length-5)) {
+                app->clip_start=clip_clamp(target,0,app->clip_duration-app->clip_length);
+                app->clip_status=0;
+            } else clip_adjust(app,app->clip_focus,target);
+        } else app->clip_focus=clip_clamp(app->clip_focus-step,0,3);
     } else if(sscanf(message,"k %c %d",&phase,&x)==2 && phase=='u') {
         if(x==RETURN_KEY) {
-            if(app->clip_focus) app->clip_focus=0;
+            if(app->clip_edit) app->clip_edit=false;
             else app->quit=true;
         } else if(x==CENTRE_KEY) {
-            if(!app->clip_focus) app->clip_focus=1;
-            else if(max||app->clip_duration==10) app->clip_request=app->clip_focus;
+            if(app->clip_focus<2) app->clip_edit=!app->clip_edit;
+            else app->clip_request=app->clip_focus-1;
         }
     } else if(sscanf(message,"t %c %d %d",&phase,&x,&y)==3) {
-        if((phase=='d'||phase=='m'||phase=='u') && y>=85&&y<=205) {
-            int n=(x-15)*app->clip_duration/345-5;
-            app->clip_start=n<0?0:n>max?max:n;
-            app->clip_focus=0;
-        } else if(phase=='u'&&y>=251&&y<=303&&app->clip_duration>=10) {
-            app->clip_focus=x<WIDTH/2?1:2;
-            app->clip_request=app->clip_focus;
+        if(phase=='d') {
+            app->clip_drag=0;
+            if(y>=85&&y<=202) {
+                int left=15+(int)((int64_t)345*app->clip_start/app->clip_duration);
+                int right=15+(int)((int64_t)345*(app->clip_start+app->clip_length)/app->clip_duration);
+                if(abs(x-left)<=8) app->clip_drag=1;
+                else if(abs(x-right)<=8) app->clip_drag=2;
+                else app->clip_drag=3;
+            }
+        }
+        if(app->clip_drag && (phase=='d'||phase=='m'||phase=='u')) {
+            int target=clip_clamp((int)((int64_t)(x-15)*app->clip_duration/345),0,app->clip_duration);
+            if(app->clip_drag==3) {
+                app->clip_start=clip_clamp(target-app->clip_length/2,0,app->clip_duration-app->clip_length);
+                app->clip_status=0;
+            } else {
+                app->clip_focus=app->clip_drag-1;
+                clip_adjust(app,app->clip_focus,target);
+            }
+            if(phase=='u') app->clip_drag=0;
+        } else if(phase=='u'&&y>=205&&y<233) {
+            app->clip_focus=x<WIDTH/2?0:1; app->clip_edit=true;
+        } else if(phase=='u'&&y>=251&&y<=303) {
+            app->clip_focus=x<WIDTH/2?2:3;
+            app->clip_edit=false; app->clip_request=app->clip_focus-1;
         }
     }
 }
-
 void app_input(struct app *app, const char *message, int64_t now, const struct tm *today)
 {
     if(app->screen==RINGTONE) { clip_input(app,message,now); return; }
@@ -2255,16 +2293,16 @@ static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
     char label[96],title[80];
     fit_text(title,sizeof title,app->clip_title,WIDTH-24,false);
     centered(pixels,stride,0,39,WIDTH,title,INK);
-    if(app->clip_duration<10) {
-        small_centered(pixels,stride,75,"Choose a readable song of at least 10s",MUTED);
+    if(app->clip_duration<5) {
+        small_centered(pixels,stride,75,"Song unavailable or shorter than 5s",MUTED);
         return;
     }
     snprintf(label,sizeof label,"%d:%02d",app->clip_duration/60,app->clip_duration%60);
     small_centered(pixels,stride,65,label,MUTED);
     int left=15+(int)((int64_t)345*app->clip_start/app->clip_duration);
-    int right=15+(int)((int64_t)345*(app->clip_start+10)/app->clip_duration);
+    int right=15+(int)((int64_t)345*(app->clip_start+app->clip_length)/app->clip_duration);
     if(right-left<3) right=left+3;
-    if(right>360) right=360;
+    if(right>360) { right=360; if(left>357) left=357; }
     fill(pixels,stride,left,87,right-left,112,blend(BG,ACCENT,70));
     for(int i=0;i<80;i++) {
         int x=15+i*345/80;
@@ -2273,19 +2311,23 @@ static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
     }
     fill(pixels,stride,left,87,2,112,ACCENT);
     fill(pixels,stride,right-2,87,2,112,ACCENT);
+    fill(pixels,stride,left,87,4,12,ACCENT);
+    fill(pixels,stride,right-4,187,4,12,ACCENT);
+    if(app->clip_focus<2) outline(pixels,stride,app->clip_focus?202:12,205,161,27,app->clip_edit?ACCENT:INK);
     snprintf(label,sizeof label,"Start %d:%02d",app->clip_start/60,app->clip_start%60);
     draw_text_fitted(pixels,stride,15,209,160,label,INK);
-    snprintf(label,sizeof label,"End %d:%02d",(app->clip_start+10)/60,(app->clip_start+10)%60);
+    int end=app->clip_start+app->clip_length;
+    snprintf(label,sizeof label,"End %d:%02d",end/60,end%60);
     draw_text_fitted(pixels,stride,210,209,150,label,INK);
-    small_centered(pixels,stride,233,app->clip_status<0?"Audio operation failed":app->clip_status==1?"Preview requested":"10 seconds",ACCENT);
+    snprintf(label,sizeof label,"%d seconds%s",app->clip_length,app->clip_edit?"  /  Wheel adjusts":"");
+    small_centered(pixels,stride,233,app->clip_status<0?"Audio operation failed":app->clip_status==1?"Preview requested":label,ACCENT);
     for(int i=0;i<2;i++) {
         int x=15+i*177;
         fill(pixels,stride,x,253,168,43,i?ACCENT:SCHEME.fill);
-        if(app->clip_focus==i+1) outline(pixels,stride,x,253,168,43,INK);
-        centered(pixels,stride,x,263,168,i?"Save":"Preview",i?0xffffffu:INK);
+        if(app->clip_focus==i+2) outline(pixels,stride,x,253,168,43,INK);
+        centered(pixels,stride,x,263,168,i?"Save MP3":"Preview",i?0xffffffu:INK);
     }
 }
-
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, time_t utc, const struct tm *today)
 {
     extra_tick(&app->extra,now);

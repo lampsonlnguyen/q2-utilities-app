@@ -46,7 +46,10 @@ struct app {
     char number[32];
     bool timer_edit, timer_alarm, timer_started;
     int timer_touch_y;
-    int clip_start, clip_duration, clip_focus, clip_request, clip_status;
+    int clip_start, clip_length, clip_duration, clip_focus, clip_request, clip_status;
+    bool clip_edit;
+    int clip_drag;
+    char clip_path[512];
     unsigned char clip_wave[80];
     char clip_title[80];
     ExtraTools extra;

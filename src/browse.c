@@ -60,8 +60,9 @@ bool menu_screen(const char *uri, enum screen *out)
 
 #define CARD "/mnt/mmc"
 #define SONG_FILE CARD "/.utilities-app/alarm-song"
-#define CLIP CARD "/.utilities-app/alarm.wav"
-#define PREVIEW CARD "/.utilities-app/preview.wav"
+#define CLIP CARD "/.utilities-app/alarm.mp3"
+#define OLD_CLIP CARD "/.utilities-app/alarm.wav"
+#define PREVIEW CARD "/.utilities-app/preview.mp3"
 #define OFFSET CARD "/.utilities-app/alarm-offset"
 #define QUEUE CARD "/.utilities-app/alarm.m3u"
 #define PLAY "/tmp/q2-utilities-app.play"
@@ -189,28 +190,29 @@ static int song_length(const char *path)
     if(!d||q2_sscanf(d+10,"%d:%d:%lf",&h,&m,&s)!=3) return 0;
     return h*3600+m*60+(int)s;
 }
-static bool make_clip(const char *song,int start,const char *dest)
+static bool make_clip(const char *song,int start,int length,const char *dest)
 {
-    char offset[24],temp[PATH_SIZE];
+    char offset[24],duration[24],temp[PATH_SIZE];
+    if(start<0||length<5||length>30) return false;
     snprintf(offset,sizeof offset,"%d",start);
-    if(snprintf(temp,sizeof temp,"%s.tmp.wav",dest)>=(int)sizeof temp) return false;
+    snprintf(duration,sizeof duration,"%d",length);
+    if(snprintf(temp,sizeof temp,"%s.tmp.mp3",dest)>=(int)sizeof temp) return false;
     char *args[]={"ffmpeg","-nostdin","-v","error","-y","-ss",offset,"-i",(char *)song,
-                  "-t","10","-map","0:a:0","-vn","-ac","2","-ar","44100",
-                  "-c:a","pcm_s16le",temp,NULL};
+                  "-t",duration,"-map","0:a:0","-vn","-ac","1","-ar","44100",
+                  "-c:a","libmp3lame","-b:a","96k","-map_metadata","-1",temp,NULL};
     unsigned mode;
     uint64_t size;
     if(ffmpeg(args,NULL,0)==0 && !file_info(temp,&mode,&size) && S_ISREG(mode) && size>44 && !rename(temp,dest)) return true;
     unlink(temp);
     return false;
-}
-static int saved_offset(void)
+}static int saved_offset(int *length)
 {
     FILE *f=fopen(OFFSET,"r");
-    int n=0;
-    if(f) { if(q2_fscanf(f,"%d",&n)!=1) n=0; fclose(f); }
+    int n=0,l=10;
+    if(f) { if(q2_fscanf(f,"%d %d",&n,&l)<1) n=0; fclose(f); }
+    if(length) *length=l<5?5:l>30?30:l;
     return n<0?0:n;
-}
-static bool play_path(const char *song)
+}static bool play_path(const char *song)
 {
     char line[128],list[PATH_SIZE+2];
     snprintf(list,sizeof list,"%s\n",song);
@@ -221,16 +223,23 @@ static bool play_path(const char *song)
     return put(PLAY,line);
 }
 
-bool ringtone_load(struct app *app)
+bool ringtone_load(struct app *app,const char *context)
 {
     char song[PATH_SIZE];
-    if(!selected_song(song,sizeof song)) return false;
+    if(context && *context) {
+        if(!valid_path(context,false)) return false;
+        snprintf(song,sizeof song,"%s",context);
+    } else if(!selected_song(song,sizeof song)) return false;
+    snprintf(app->clip_path,sizeof app->clip_path,"%s",song);
     snprintf(app->clip_title,sizeof app->clip_title,"%.79s",base(song));
     int duration=song_length(song);
-    if(duration<10||duration>86400) return false;
+    if(duration<5||duration>86400) return false;
     app->clip_duration=duration;
-    app->clip_start=saved_offset();
-    if(app->clip_start>duration-10) app->clip_start=duration-10;
+    char old[PATH_SIZE];
+    app->clip_length=10;
+    app->clip_start=selected_song(old,sizeof old)&&!strcmp(old,song)?saved_offset(&app->clip_length):0;
+    if(app->clip_length>duration) app->clip_length=duration;
+    if(app->clip_start>duration-app->clip_length) app->clip_start=duration-app->clip_length;
     /* Downsample on-device to 1 kHz mono PCM; stream into 80 peak bins.
      * The temporary file avoids retaining decoded audio in RAM. */
     const char *raw="/tmp/q2-utilities-wave.raw";
@@ -257,21 +266,24 @@ bool ringtone_load(struct app *app)
     unlink(raw);
     return true;
 }
-bool ringtone_apply(int start,bool save)
+bool ringtone_apply(const struct app *app,bool save)
 {
-    char song[PATH_SIZE],value[24];
-    if(!selected_song(song,sizeof song)) return false;
-    if(!make_clip(song,start,save?CLIP:PREVIEW)) return false;
+    char value[48];
+    if(!valid_path(app->clip_path,false)||app->clip_start<0||app->clip_length<5||
+       app->clip_length>30||app->clip_start>app->clip_duration-app->clip_length) return false;
+    if(!make_clip(app->clip_path,app->clip_start,app->clip_length,save?CLIP:PREVIEW)) return false;
     if(!save) return play_path(PREVIEW);
-    snprintf(value,sizeof value,"%d",start);
-    return put(OFFSET,value);
+    snprintf(value,sizeof value,"%d %d",app->clip_start,app->clip_length);
+    if(!put(SONG_FILE,app->clip_path)||!put(OFFSET,value)) return false;
+    unlink(OLD_CLIP);
+    return true;
 }
-
 bool alarm_play(void)
 {
     char song[PATH_SIZE];
-    if(!selected_song(song,sizeof song)) return false;
     if(access(CLIP,R_OK)==0) return play_path(CLIP);
+    if(access(OLD_CLIP,R_OK)==0) return play_path(OLD_CLIP);
+    if(!selected_song(song,sizeof song)) return false;
     return play_path(song);
 }
 void alarm_deadline(int64_t due)
@@ -347,8 +359,8 @@ static void sound_menu(FILE *out,const char *id)
     char path[PATH_SIZE];
     header(out,id,"","");
     row(out,"info","","Selected song",selected_song(path,sizeof path)?base(path):"None","");
-    row(out,"list","folder","Choose from Library","",CARD);
-    row(out,"screen","ringtone","Edit 10-second clip","","");
+    row(out,"list","folder","Choose song / Make ringtone","",CARD);
+    if(selected_song(path,sizeof path)) row(out,"screen","ringtone","Edit saved ringtone","","");
     row(out,"action","preview","Preview alarm","","");
     row(out,"action","clear","Clear selection","","");
 }
@@ -381,35 +393,9 @@ static void folder(FILE *out,const char *id,const char *path,const char *cursor)
     for(unsigned i=0;i<n;i++) {
         char full[PATH_SIZE];
         if(snprintf(full,sizeof full,"%s/%s",path,entries[i].name)>=(int)sizeof full) continue;
-        row(out,entries[i].dir?"list":"action",entries[i].dir?"folder":"choose",entries[i].name,"",full);
+        row(out,entries[i].dir?"list":"screen",entries[i].dir?"folder":"ringtone",entries[i].name,"",full);
     }
     if(!n) row(out,"info","","No music or folders","","");
-}
-
-static int draft_start=-1;
-
-static void clip_menu(FILE *out,const char *id,int start)
-{
-    char song[PATH_SIZE],range[64],arg[32];
-    if(!selected_song(song,sizeof song)) {
-        header(out,id,"",""); row(out,"info","","Choose a song first","",""); return;
-    }
-    int duration=song_length(song);
-    if(duration<10) {
-        header(out,id,"",""); row(out,"info","","Song shorter than 10 seconds or unreadable","",""); return;
-    }
-    if(start<0) start=0;
-    if(start>duration-10) start=duration-10;
-    snprintf(range,sizeof range,"%02d:%02d - %02d:%02d",start/60,start%60,(start+10)/60,(start+10)%60);
-    snprintf(arg,sizeof arg,"%d",start);
-    header(out,id,"","");
-    row(out,"info","",base(song),range,"");
-    /* Firmware lists provide the theme, selection and native wheel input. */
-    row(out,"field","clipseek","Start time (MM:SS)",range,arg);
-    row(out,"action","clipback","Back 10 seconds","",arg);
-    row(out,"action","clipnext","Forward 10 seconds","",arg);
-    row(out,"action","clippreview","Preview 10 seconds","",arg);
-    row(out,"action","clipsave","Save alarm clip","",arg);
 }
 
 static void reply(int fd)
@@ -443,40 +429,12 @@ static void reply(int fd)
         row(out,"list","sound","Alarm Sound","","");
     } else if(!strcmp(op,"sound")) {
         sound_menu(out,id);
-    } else if(!strcmp(op,"clip")) {
-        if(draft_start<0) draft_start=saved_offset();
-        clip_menu(out,id,draft_start);
-    } else if(!strcmp(op,"clipseek")||!strcmp(op,"clipback")||!strcmp(op,"clipnext")||
-              !strcmp(op,"clippreview")||!strcmp(op,"clipsave")) {
-        char song[PATH_SIZE],*arg=strchr(request+9,'\t');
-        if(arg) arg=strchr(arg+1,'\t');
-        int start=0;
-        if(arg && q2_sscanf(arg+1,"%8d",&start)!=1) start=0;
-        int duration=selected_song(song,sizeof song)?song_length(song):0;
-        if(!strcmp(op,"clipseek")) {
-            char *value=arg?strchr(arg+1,'\t'):NULL;
-            int m=0,s=0;
-            if(value && q2_sscanf(value+1,"%d:%d",&m,&s)==2 && m>=0 && m<=100000 && s>=0 && s<60)
-                start=m*60+s;
-        } else if(!strcmp(op,"clipback")) start-=10;
-        else if(!strcmp(op,"clipnext")) start+=10;
-        if(start<0) start=0;
-        if(duration>=10 && start>duration-10) start=duration-10;
-        draft_start=start;
-        if(!strcmp(op,"clipseek")) clip_menu(out,id,start);
-        else if(!strcmp(op,"clipback")||!strcmp(op,"clipnext")) header(out,id,"","");
-        else if(duration<10) header(out,id,"Song unavailable","");
-        else if(!strcmp(op,"clippreview")) header(out,id,make_clip(song,start,PREVIEW)&&play_path(PREVIEW)?"Playing clip":"Preview failed","");
-        else {
-            char value[24]; snprintf(value,sizeof value,"%d",start);
-            header(out,id,make_clip(song,start,CLIP)&&put(OFFSET,value)?"Alarm clip saved":"Unable to save clip","");
-        }
     } else if(!strcmp(op,"preview")) {
         header(out,id,alarm_play()?"Playing selected song":"Choose a song first","");
     } else if(!strcmp(op,"clear")) {
-        unlink(SONG_FILE); unlink(CLIP); unlink(OFFSET); draft_start=-1;
+        unlink(SONG_FILE); unlink(CLIP); unlink(OLD_CLIP); unlink(OFFSET);
         header(out,id,"Selection cleared","");
-    } else if(!strcmp(op,"folder")||!strcmp(op,"choose")) {
+    } else if(!strcmp(op,"folder")) {
         char *arg=request+9;
         arg=strchr(arg,'\t');
         if(arg) arg=strchr(arg+1,'\t');
@@ -488,12 +446,7 @@ static void reply(int fd)
             if(cursor) *cursor++=0;
             if(!cursor) cursor="";
             if(decode(arg)&&(!*cursor||decode(cursor))) {
-                if(!strcmp(op,"folder")) folder(out,id,arg,cursor);
-                else {
-                    bool ok=valid_path(arg,false)&&put(SONG_FILE,arg);
-                    if(ok) { unlink(CLIP); unlink(OFFSET); draft_start=-1; }
-                    header(out,id,ok?"Alarm song saved":"Unable to save song","");
-                }
+                folder(out,id,arg,cursor);
             } else header(out,id,"Invalid path","");
         } else header(out,id,"Missing path","");
     } else {
