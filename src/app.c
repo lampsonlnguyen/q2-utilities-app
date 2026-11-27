@@ -1095,6 +1095,7 @@ void app_input(struct app *app, const char *message, int64_t now, const struct t
 }
 
 #include "font.h"
+#include "stopwatch_digits.h"
 
 static void fill(uint32_t *pixels, unsigned stride, int x, int y, int w, int h, uint32_t color)
 {
@@ -2127,6 +2128,39 @@ static void tool_hero(struct app *app,uint32_t *pixels,unsigned stride,
 
 /* Rasterize the timer's numerals at their final size, using 4x4 coverage.
  * A rounded segment face keeps strokes clean even on the small panel. */
+/* Native-size coverage masks: never enlarge the small UI font. */
+static void stopwatch_digits(uint32_t *pixels, unsigned stride, int y,
+                             const char *value, uint32_t color)
+{
+    int height=72, width=SW72_W, total=0;
+    const unsigned char *atlas=&sw72_px[0][0];
+    for(int attempt=0;attempt<3;attempt++) {
+        total=0;
+        for(const char *p=value;*p;p++)
+            total+=(*p==':'||*p=='.')?width/2:width+3;
+        if(total<=WIDTH-20 || attempt==2) break;
+        if(attempt==0) { height=60; width=SW60_W; atlas=&sw60_px[0][0]; }
+        else { height=48; width=SW48_W; atlas=&sw48_px[0][0]; }
+    }
+    int x=(WIDTH-total)/2;
+    y+=(72-height)/2;
+    for(const char *p=value;*p;p++) {
+        int index=*p>='0'&&*p<='9'?*p-'0':*p==':'?10:11;
+        bool punctuation=index>=10;
+        int first=punctuation?width/4:0;
+        int count=punctuation?width/2:width;
+        const unsigned char *glyph=atlas+index*height*width;
+        for(int row=0;row<height;row++) for(int col=0;col<count;col++) {
+            unsigned alpha=glyph[row*width+first+col];
+            if(alpha && x+col>=0 && x+col<WIDTH && y+row<HEIGHT) {
+                uint32_t *dst=&pixels[(x+col)*stride+HEIGHT-1-y-row];
+                *dst=0xff000000u|(alpha==255?color:blend(*dst,color,alpha));
+            }
+        }
+        x+=count+(punctuation?0:3);
+    }
+}
+
 static void timer_digits(uint32_t *pixels,unsigned stride,int y,const char *value,uint32_t color)
 {
     static const unsigned masks[]={63,6,91,79,102,109,125,7,127,111};
@@ -2309,13 +2343,9 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         break;
     }
     case STOPWATCH: {
-        /* Glanceable readout: the Q2 font at 4x (88 px tall) for MM:SS.t,
-         * 3x once H:MM:SS.t no longer fits, kept centred vertically.
-         * Laps sit in a 2x2 grid of small text under it. */
+        /* Native-resolution stopwatch numerals. */
         format_elapsed(value, sizeof value, elapsed(app, now));
-        int scale = text_width(value) * 4 <= WIDTH - 28 ? 4 : 3;
-        int y = (app->lap_count ? 36 : 62) + (4 - scale) * F20_H / 2;
-        large_text(pixels, stride, y, value, scale, ACCENT, true);
+        stopwatch_digits(pixels, stride, app->lap_count ? 44 : 70, value, ACCENT);
         for (unsigned i = 0; i < app->lap_count && i < LAP_LIMIT; ++i) {
             char time[32];
             format_elapsed(time, sizeof time, app->laps[i]);

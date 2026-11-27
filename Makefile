@@ -16,7 +16,7 @@ check-sysroot:
 		echo 'Q2 sysroot is incomplete at $(SYSROOT).' >&2; \
 		echo 'Run: bash tools/mksysroot.sh "Q2 Firmware V1.36.zip" "$(SYSROOT)"' >&2; exit 1; }
 
-build/q2/%.o: src/%.c src/app.h src/font.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/browse.h | check-sysroot
+build/q2/%.o: src/%.c src/app.h src/font.h src/stopwatch_digits.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/browse.h | check-sysroot
 	mkdir -p $(@D)
 	$(Q2_CC) $(Q2_FLAGS) $(CFLAGS) -std=gnu11 -c $< -o $@
 
@@ -38,7 +38,7 @@ $(CARD)/run: run
 dist/.utilities-app.zip: $(CARD)/q2-utilities-app $(CARD)/q2app $(CARD)/run
 	cd dist && rm -f .utilities-app.zip && zip -q .utilities-app.zip .utilities-app/q2app .utilities-app/q2-utilities-app .utilities-app/run
 
-build/host/check: tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c src/extra_tools.c src/app.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/font.h
+build/host/check: tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c src/extra_tools.c src/app.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/font.h src/stopwatch_digits.h
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -std=gnu11 -Isrc -o $@ tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c src/extra_tools.c
 
