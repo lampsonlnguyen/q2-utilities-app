@@ -455,9 +455,9 @@ static void reply(int fd)
     if (!strcmp(op, "menu")) {
         fprintf(out, "Q2SPOT/1\n%s\tok\t\t\n", id);
         for (unsigned i = 0; i < sizeof tools / sizeof tools[0]; ++i) {
-            if(tools[i].screen==COUNTDOWN) row(out,"list","timer","Timer","","");
-            else row(out,"screen",tools[i].uri,tools[i].title,"","");
+            row(out,"screen",tools[i].uri,tools[i].title,"","");
         }
+        row(out,"list","sound","Alarm Sound","","");
     } else if(!strcmp(op,"timer")) {
         header(out,id,"","");
         row(out,"screen","timer","Set Timer","","");

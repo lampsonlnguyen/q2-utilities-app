@@ -2398,6 +2398,34 @@ static void draw_stopwatch(struct app *app,uint32_t *pixels,unsigned stride,int6
     watch_controls(app,pixels,stride);
 }
 
+
+/* Rounded coverage masks use four subpixel samples per axis at the edge.
+ * The interior uses ordinary spans; no temporary framebuffer is needed. */
+static unsigned clip_round_alpha(int x,int y,int w,int h,int radius)
+{
+    if(x<0||y<0||x>=w||y>=h) return 0;
+    int cx=x<radius?radius:x>=w-radius?w-radius:-1;
+    int cy=y<radius?radius:y>=h-radius?h-radius:-1;
+    if(cx<0||cy<0) return 255;
+    int hits=0;
+    for(int sy=0;sy<4;sy++) for(int sx=0;sx<4;sx++) {
+        int dx=x*8+sx*2+1-cx*8,dy=y*8+sy*2+1-cy*8;
+        hits+=dx*dx+dy*dy<=radius*radius*64;
+    }
+    return (unsigned)(hits*255/16);
+}
+static void clip_pixel(uint32_t *pixels,unsigned stride,int x,int y,uint32_t color,unsigned alpha)
+{
+    if(!alpha||x<0||x>=WIDTH||y<0||y>=HEIGHT) return;
+    uint32_t *dst=&pixels[x*stride+HEIGHT-1-y];
+    *dst=0xff000000u|(alpha==255?color:blend(*dst,color,alpha));
+}
+static void clip_round(uint32_t *pixels,unsigned stride,int x,int y,int w,int h,int radius,uint32_t color)
+{
+    for(int row=0;row<h;row++) for(int col=0;col<w;col++)
+        clip_pixel(pixels,stride,x+col,y+row,color,clip_round_alpha(col,row,w,h,radius));
+}
+
 static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
 {
     char label[96],title[80];
@@ -2413,23 +2441,40 @@ static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
     int right=15+(int)((int64_t)345*(app->clip_start+app->clip_length)/app->clip_duration);
     if(right-left<3) right=left+3;
     if(right>360) { right=360; if(left>357) left=357; }
-    fill(pixels,stride,left,87,right-left,112,blend(BG,0x377acb,80));
-    if(app->clip_wave_ready) for(int i=0;i<80;i++) {
-        int x=15+i*345/80;
-        unsigned peak=0;
-        for(int j=0;j<4;j++) if(app->clip_wave[i*4+j]>peak) peak=app->clip_wave[i*4+j];
-        int height=2+(int)peak*100/255;
-        uint32_t bar=x>=left&&x<right?0x80baff:MUTED;
-        int top=143-height/2;
-        fill(pixels,stride,x,top,2,height,bar);
-        if(height>4) { disc(pixels,stride,x,top+1,1,bar); disc(pixels,stride,x,top+height-2,1,bar); }
-    } else small_centered(pixels,stride,135,"Waveform unavailable",MUTED);
-    fill(pixels,stride,left,87,2,112,0x80baff);
-    fill(pixels,stride,right-2,87,2,112,0x80baff);
-    fill(pixels,stride,left,132,4,22,0x80baff);
-    fill(pixels,stride,right-4,132,4,22,0x80baff);
-    if(app->clip_focus==0) outline(pixels,stride,15,85,345,116,app->clip_edit?ACCENT:INK);
-    else if(app->clip_focus<3) outline(pixels,stride,app->clip_focus==2?202:12,205,161,27,app->clip_edit?ACCENT:INK);
+    const uint32_t paper=0x354e61, selected=0x68b4e8;
+    /* Both regions share the same rounded mask, including at song ends. */
+    for(int y=0;y<112;y++) for(int x=0;x<345;x++) {
+        unsigned alpha=clip_round_alpha(x,y,345,112,15);
+        int px=x+15;
+        clip_pixel(pixels,stride,px,y+87,px>=left&&px<right?selected:paper,alpha);
+    }
+    if(app->clip_wave_ready) {
+        for(int i=0;i<75;i++) {
+            int x=27+i*321/75;
+            unsigned peak=0;
+            int first=i*320/75,last=(i+1)*320/75;
+            for(int j=first;j<last;j++) if(app->clip_wave[j]>peak) peak=app->clip_wave[j];
+            int height=3+(int)peak*86/255;
+            clip_round(pixels,stride,x,143-height/2,3,height,1,
+                       x+1>=left&&x+1<right?0xf1faff:0x91a9b8);
+        }
+    } else small_centered(pixels,stride,135,"Waveform unavailable",0xe0edf5);
+    for(int y=89;y<197;y++) {
+        unsigned l=clip_round_alpha(left-15,y-87,345,112,15);
+        unsigned r=clip_round_alpha(right-1-15,y-87,345,112,15);
+        clip_pixel(pixels,stride,left,y,0xd9f2ff,l);
+        clip_pixel(pixels,stride,right-1,y,0xd9f2ff,r);
+    }
+    int lx=clip_clamp(left-4,15,350),rx=clip_clamp(right-5,15,350);
+    /* Separate vertically when a very short selection makes handles overlap. */
+    int ly=129,ry=129;
+    if(rx-lx<10) { ly=111; ry=151; }
+    clip_round(pixels,stride,lx,ly,10,28,5,0xffffff);
+    clip_round(pixels,stride,rx,ry,10,28,5,0xffffff);
+    if(app->clip_focus==0)
+        small_centered(pixels,stride,202,app->clip_edit?"Wheel moves selection":"",MUTED);
+    else if(app->clip_focus<3)
+        fill(pixels,stride,app->clip_focus==2?210:15,231,150,2,app->clip_edit?0x68b4e8:MUTED);
     snprintf(label,sizeof label,"Start %d:%02d",app->clip_start/60,app->clip_start%60);
     draw_text_fitted(pixels,stride,15,209,160,label,INK);
     int end=app->clip_start+app->clip_length;
@@ -2439,17 +2484,11 @@ static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
     small_centered(pixels,stride,233,app->clip_status<0?(app->clip_error[0]?app->clip_error:"Audio operation failed"):app->clip_status==1?"Preview requested":app->clip_status==2?"Preparing audio...":label,ACCENT);
     for(int i=0;i<2;i++) {
         int x=15+i*177;
-        uint32_t color=i?0x2868be:0x35383e;
-        for(int row=0;row<43;row++) {
-            int inset=row<5?5-row:row>37?row-37:0;
-            fill(pixels,stride,x+inset,253+row,168-2*inset,1,color);
-        }
-        if(app->clip_focus==i+3) {
-            fill(pixels,stride,x+8,253,152,2,0x80baff);
-            fill(pixels,stride,x+8,294,152,2,0x80baff);
-        }
+        uint32_t color=i?0x68b4e8:0x30363d;
+        if(app->clip_focus==i+3) clip_round(pixels,stride,x-2,251,172,47,13,0x80baff);
+        clip_round(pixels,stride,x,253,168,43,11,color);
         if(!i) for(int j=0;j<10;j++) fill(pixels,stride,x+30+j,274-(10-j)/2,1,10-j,0xffffff);
-        centered(pixels,stride,x+(i?0:12),263,168-(i?0:12),i?"Save MP3":"Preview",0xffffff);
+        centered(pixels,stride,x+(i?0:12),263,168-(i?0:12),i?"Save MP3":"Preview",i?0x122536:0xffffff);
     }
 }
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, time_t utc, const struct tm *today)
