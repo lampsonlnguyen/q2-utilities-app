@@ -195,6 +195,8 @@ int main(int argc, char **argv)
                     alarm_deadline(app.extra.countdown.running?app.extra.countdown.due_ms:0);
                 if(selected==RINGTONE && app.clip_request) {
                     bool save=app.clip_request==2;
+                    app.clip_status=2;
+                    app_draw(&app,memory+visible*stride,stride,monotonic_ms(),date,&today);
                     bool ok=ringtone_apply(&app,save);
                     app.clip_request=0;
                     app.clip_status=ok?1:-1;

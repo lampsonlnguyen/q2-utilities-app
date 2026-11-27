@@ -366,6 +366,28 @@ static void theme(void)
     app_theme("",12);
 }
 
+static void ringtone_controls(void)
+{
+    struct app editor;
+    app_init(&editor,app.task_path);
+    editor.screen=RINGTONE;
+    editor.clip_duration=120;
+    editor.clip_length=10;
+    editor.clip_start=20;
+    app_input(&editor,"t d 300 140",100,&today);
+    app_input(&editor,"t u 300 140",101,&today);
+    assert(editor.clip_length==10 && editor.clip_start>80);
+    app_input(&editor,"t d 359 140",102,&today);
+    app_input(&editor,"t u 359 140",103,&today);
+    assert(editor.clip_start>=0 && editor.clip_start+editor.clip_length<=120);
+    assert(editor.clip_length>=5 && editor.clip_length<=30);
+    app_input(&editor,"t u 70 270",104,&today);
+    assert(editor.clip_request==1);
+    app_input(&editor,"t u 270 270",105,&today);
+    assert(editor.clip_request==2);
+    app_draw(&editor,pixels,HEIGHT,105,UTC,&today);
+}
+
 int main(void)
 {
     char dir[] = "/tmp/q2-utilities-test.XXXXXX";
@@ -383,6 +405,7 @@ int main(void)
     expanded_utilities();
     metronome_classic();
     calculator();
+    ringtone_controls();
     assert(unlink(path) == 0);
     char counter_path[160];
     snprintf(counter_path,sizeof counter_path,"%s/counters.tsv",dir);

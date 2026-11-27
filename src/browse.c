@@ -173,7 +173,18 @@ static int ffmpeg(char *const args[], char *log, size_t size)
                 memcpy(log+used,buf,copy); used+=copy;
             }
         }
-        if(waitpid(child,&status,WNOHANG)==child) { exited=true; break; }
+        if(waitpid(child,&status,WNOHANG)==child) {
+            exited=true;
+            /* Drain remaining diagnostics after exit; duration can be in the tail. */
+            char tail[512]; ssize_t n;
+            while((n=read(pipefd[0],tail,sizeof tail))>0) {
+                if(log && used<size-1) {
+                    size_t copy=(size_t)n<size-1-used?(size_t)n:size-1-used;
+                    memcpy(log+used,tail,copy); used+=copy;
+                }
+            }
+            break;
+        }
     }
     if(!exited) { kill(child,SIGKILL); waitpid(child,&status,0); }
     if(log && size) log[used]=0;
@@ -242,18 +253,19 @@ bool ringtone_load(struct app *app,const char *context)
     if(app->clip_start>duration-app->clip_length) app->clip_start=duration-app->clip_length;
     /* Downsample on-device to 1 kHz mono PCM; stream into 80 peak bins.
      * The temporary file avoids retaining decoded audio in RAM. */
-    const char *raw="/tmp/q2-utilities-wave.raw";
+    char raw[80];
+    snprintf(raw,sizeof raw,"/tmp/q2-utilities-wave.%ld.raw",(long)getpid());
     char *args[]={"ffmpeg","-nostdin","-v","error","-y","-i",song,
         "-map","0:a:0","-vn","-ac","1","-ar","1000","-f","s16le",(char *)raw,NULL};
     if(ffmpeg(args,NULL,0)!=0) { unlink(raw); app->clip_status=-1; return true; }
     FILE *f=fopen(raw,"rb");
     if(f) {
         unsigned char samples[2048]; size_t n; uint64_t pos=0;
-        unsigned peaks[80]={0},peak=1;
+        unsigned peaks[320]={0},peak=1;
         while((n=fread(samples,1,sizeof samples,f))>0) {
             for(size_t i=0;i+1<n;i+=2,pos++) {
-                unsigned bin=(unsigned)(pos*80/((uint64_t)duration*1000));
-                if(bin>=80) bin=79;
+                unsigned bin=(unsigned)(pos*320/((uint64_t)duration*1000));
+                if(bin>=320) bin=319;
                 int v=(int16_t)(samples[i]|((unsigned)samples[i+1]<<8));
                 unsigned mag=(unsigned)(v<0?-v:v);
                 if(mag>peaks[bin]) peaks[bin]=mag;
@@ -261,7 +273,8 @@ bool ringtone_load(struct app *app,const char *context)
             }
         }
         fclose(f);
-        for(int i=0;i<80;i++) app->clip_wave[i]=(unsigned char)(peaks[i]*255/peak);
+        for(int i=0;i<320;i++) app->clip_wave[i]=(unsigned char)(peaks[i]*255/peak);
+        app->clip_wave_ready=pos>0;
     } else app->clip_status=-1;
     unlink(raw);
     return true;
@@ -271,10 +284,15 @@ bool ringtone_apply(const struct app *app,bool save)
     char value[48];
     if(!valid_path(app->clip_path,false)||app->clip_start<0||app->clip_length<5||
        app->clip_length>30||app->clip_start>app->clip_duration-app->clip_length) return false;
-    if(!make_clip(app->clip_path,app->clip_start,app->clip_length,save?CLIP:PREVIEW)) return false;
-    if(!save) return play_path(PREVIEW);
+    if(!save) return make_clip(app->clip_path,app->clip_start,app->clip_length,PREVIEW)&&play_path(PREVIEW);
+    /* Commit the audio last. An encoding failure never replaces the alarm. */
+    const char *candidate=CARD "/.utilities-app/alarm.pending.mp3";
+    if(!make_clip(app->clip_path,app->clip_start,app->clip_length,candidate)) return false;
     snprintf(value,sizeof value,"%d %d",app->clip_start,app->clip_length);
-    if(!put(SONG_FILE,app->clip_path)||!put(OFFSET,value)) return false;
+    if(!put(SONG_FILE,app->clip_path)||!put(OFFSET,value)||rename(candidate,CLIP)) {
+        unlink(candidate);
+        return false;
+    }
     unlink(OLD_CLIP);
     return true;
 }

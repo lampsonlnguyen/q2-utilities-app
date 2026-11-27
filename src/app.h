@@ -48,9 +48,10 @@ struct app {
     int timer_touch_y;
     int clip_start, clip_length, clip_duration, clip_focus, clip_request, clip_status;
     bool clip_edit;
-    int clip_drag;
+    int clip_drag, clip_drag_offset;
+    bool clip_wave_ready;
     char clip_path[512];
-    unsigned char clip_wave[80];
+    unsigned char clip_wave[320];
     char clip_title[80];
     ExtraTools extra;
 };
