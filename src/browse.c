@@ -62,7 +62,7 @@ bool menu_screen(const char *uri, enum screen *out)
 #define SONG_FILE CARD "/.utilities-app/alarm-song"
 #define CLIP CARD "/.utilities-app/alarm.mp3"
 #define OLD_CLIP CARD "/.utilities-app/alarm.wav"
-#define PREVIEW CARD "/.utilities-app/preview.mp3"
+#define PREVIEW CARD "/.utilities-app/preview.wav"
 #define OFFSET CARD "/.utilities-app/alarm-offset"
 #define QUEUE CARD "/.utilities-app/alarm.m3u"
 #define PLAY "/tmp/q2-utilities-app.play"
@@ -201,19 +201,30 @@ static int song_length(const char *path)
     if(!d||q2_sscanf(d+10,"%d:%d:%lf",&h,&m,&s)!=3) return 0;
     return h*3600+m*60+(int)s;
 }
-static bool make_clip(const char *song,int start,int length,const char *dest)
+static bool make_clip(const char *song,int start,int length,const char *dest,bool mp3,char *error,size_t error_size)
 {
     char offset[24],duration[24],temp[PATH_SIZE];
     if(start<0||length<5||length>30) return false;
     snprintf(offset,sizeof offset,"%d",start);
     snprintf(duration,sizeof duration,"%d",length);
-    if(snprintf(temp,sizeof temp,"%s.tmp.mp3",dest)>=(int)sizeof temp) return false;
+    if(snprintf(temp,sizeof temp,"%s.tmp.%s",dest,mp3?"mp3":"wav")>=(int)sizeof temp) return false;
     char *args[]={"ffmpeg","-nostdin","-v","error","-y","-ss",offset,"-i",(char *)song,
                   "-t",duration,"-map","0:a:0","-vn","-ac","1","-ar","44100",
-                  "-c:a","libmp3lame","-b:a","96k","-map_metadata","-1",temp,NULL};
+                  "-c:a",mp3?"libmp3lame":"pcm_s16le","-b:a","96k","-map_metadata","-1",temp,NULL};
     unsigned mode;
     uint64_t size;
-    if(ffmpeg(args,NULL,0)==0 && !file_info(temp,&mode,&size) && S_ISREG(mode) && size>44 && !rename(temp,dest)) return true;
+    char log[2048];
+    int result=ffmpeg(args,log,sizeof log);
+    if(result==0 && !file_info(temp,&mode,&size) && S_ISREG(mode) && size>44 && !rename(temp,dest)) return true;
+    if(error&&error_size) {
+        const char *reason=strstr(log,"Unknown encoder")?"MP3 encoder unavailable":
+            strstr(log,"Permission denied")?"Storage permission denied":
+            strstr(log,"No space left")?"SD card full":
+            result==127?"FFmpeg unavailable":result<0?"Audio conversion timed out":
+            result==0?"Cannot save audio file":"Audio conversion failed";
+        snprintf(error,error_size,"%s",reason);
+        put(CARD "/.utilities-app/ringtone-error.txt",log);
+    }
     unlink(temp);
     return false;
 }static int saved_offset(int *length)
@@ -279,15 +290,21 @@ bool ringtone_load(struct app *app,const char *context)
     unlink(raw);
     return true;
 }
-bool ringtone_apply(const struct app *app,bool save)
+bool ringtone_apply(struct app *app,bool save)
 {
     char value[48];
+    app->clip_error[0]=0;
     if(!valid_path(app->clip_path,false)||app->clip_start<0||app->clip_length<5||
        app->clip_length>30||app->clip_start>app->clip_duration-app->clip_length) return false;
-    if(!save) return make_clip(app->clip_path,app->clip_start,app->clip_length,PREVIEW)&&play_path(PREVIEW);
+    if(!save) {
+        if(!make_clip(app->clip_path,app->clip_start,app->clip_length,PREVIEW,false,app->clip_error,sizeof app->clip_error)) return false;
+        if(play_path(PREVIEW)) return true;
+        snprintf(app->clip_error,sizeof app->clip_error,"Cannot request playback");
+        return false;
+    }
     /* Commit the audio last. An encoding failure never replaces the alarm. */
     const char *candidate=CARD "/.utilities-app/alarm.pending.mp3";
-    if(!make_clip(app->clip_path,app->clip_start,app->clip_length,candidate)) return false;
+    if(!make_clip(app->clip_path,app->clip_start,app->clip_length,candidate,true,app->clip_error,sizeof app->clip_error)) return false;
     snprintf(value,sizeof value,"%d %d",app->clip_start,app->clip_length);
     if(!put(SONG_FILE,app->clip_path)||!put(OFFSET,value)||rename(candidate,CLIP)) {
         unlink(candidate);

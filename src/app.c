@@ -288,13 +288,13 @@ static int64_t elapsed(const struct app *app, int64_t now)
 static void format_elapsed(char *text, size_t size, int64_t ms)
 {
     if (ms < 3600000)
-        snprintf(text, size, "%02lld:%02lld.%01lld",
+        snprintf(text, size, "%02lld:%02lld.%02lld",
                  (long long)(ms / 60000), (long long)(ms / 1000 % 60),
-                 (long long)(ms / 100 % 10));
+                 (long long)(ms / 10 % 100));
     else
-        snprintf(text, size, "%lld:%02lld:%02lld.%01lld",
+        snprintf(text, size, "%lld:%02lld:%02lld.%02lld",
                  (long long)(ms / 3600000), (long long)(ms / 60000 % 60),
-                 (long long)(ms / 1000 % 60), (long long)(ms / 100 % 10));
+                 (long long)(ms / 1000 % 60), (long long)(ms / 10 % 100));
 }
 
 static int days_in_month(int year, int month)
@@ -514,11 +514,8 @@ static void make_layout(const struct app *app, struct layout *layout)
         /* The map picker has no list buttons; its input is separate. */
         break;
     case STOPWATCH:
-        /* Primary action row below the large readout (y=190..235, as
-         * in docs/compact-screen-ux.md). */
-        button(layout, 18, 190, 108, 46, 0, app->running ? "Pause" : "Start");
-        button(layout, 134, 190, 107, 46, 1, "Lap");
-        button(layout, 249, 190, 108, 46, 2, "Reset");
+        button(layout, 267, 254, 88, 60, 0, app->running ? "Pause" : "Start");
+        button(layout, 20, 254, 88, 60, app->running?1:2, app->running?"Lap":"Reset");
         break;
     case CALENDAR:
         button(layout, 18, 247, 108, 42, -1, "< Month");
@@ -777,6 +774,11 @@ static void wheel_move(struct app *app, int travel, int64_t now)
     int step = (int)(travel_fine / app->wheel_units);
     app->wheel = (int)(travel_fine % app->wheel_units);
 
+    if (app->screen == STOPWATCH) {
+        int mode=(app->stopwatch_mode-step)%3;
+        app->stopwatch_mode=mode<0?mode+3:mode;
+        return;
+    }
     if (app->screen == WC_MAP) {
         int next = app->wc_map - step;
         app->wc_map = next < 0 ? 0 : next >= WC_MAP_COUNT ? WC_MAP_COUNT - 1 : next;
@@ -1108,7 +1110,9 @@ void app_input(struct app *app, const char *message, int64_t now, const struct t
     } else if (sscanf(message, "k %c %d", &phase, &a) == 2 && phase == 'u') {
         if (a == CENTRE_KEY || a == RETURN_KEY)
             app->wheel = 0;
-        if (a == CENTRE_KEY && app->focus < layout.count)
+        if (a == CENTRE_KEY && app->screen == STOPWATCH)
+            activate(app,0,now,today);
+        else if (a == CENTRE_KEY && app->focus < layout.count)
             activate(app, layout.items[app->focus].code, now, today);
         if (a == RETURN_KEY) {
             if (app->screen == HOME)
@@ -2291,6 +2295,109 @@ static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t 
 }
 
 
+
+/* Fixed-point dial geometry: no libm or per-frame heap allocations. */
+static const int watch_sin[60]={0,107,213,316,416,512,602,685,761,828,887,935,974,1002,1018,1024,1018,1002,974,935,887,828,761,685,602,512,416,316,213,107,0,-107,-213,-316,-416,-512,-602,-685,-761,-828,-887,-935,-974,-1002,-1018,-1024,-1018,-1002,-974,-935,-887,-828,-761,-685,-602,-512,-416,-316,-213,-107};
+static void watch_point(int cx,int cy,int r,int tick,int *x,int *y)
+{
+    tick=(tick%60+60)%60;
+    *x=cx+r*watch_sin[tick]/1024;
+    *y=cy-r*watch_sin[(tick+15)%60]/1024;
+}
+static void watch_hand(uint32_t *pixels,unsigned stride,int cx,int cy,int r,int tick,uint32_t color)
+{
+    int x,y;
+    watch_point(cx,cy,r,tick,&x,&y);
+    segment(pixels,stride,cx,cy,x,y,color);
+    segment(pixels,stride,cx+1,cy,x+1,y,color);
+    disc(pixels,stride,cx,cy,3,color);
+}
+static void watch_dial(uint32_t *pixels,unsigned stride,int cx,int cy,int r,int tick,bool big)
+{
+    uint32_t rim=blend(BG,INK,95),face=blend(BG,INK,16);
+    disc(pixels,stride,cx,cy,r,rim);
+    disc(pixels,stride,cx,cy,r-1,face);
+    for(int i=0;i<60;i++) {
+        if(!big && i%5) continue;
+        int x,y,x2,y2;
+        watch_point(cx,cy,r-4,i,&x,&y);
+        watch_point(cx,cy,r-(i%5?8:13),i,&x2,&y2);
+        segment(pixels,stride,x,y,x2,y2,i%5?MUTED:INK);
+        if(big && i%10==0) {
+            char label[8];
+            snprintf(label,sizeof label,"%d",i?i:60);
+            watch_point(cx,cy,r-24,i,&x,&y);
+            centered(pixels,stride,x-15,y-11,30,label,INK);
+        }
+    }
+    watch_hand(pixels,stride,cx,cy,r-17,tick,0xff942b);
+}
+static void watch_controls(struct app *app,uint32_t *pixels,unsigned stride)
+{
+    int cy=282;
+    uint32_t action=app->running?0x932c32:0x14633c;
+    uint32_t symbol=app->running?0xffb9bb:0x65ffac;
+    disc(pixels,stride,64,cy,26,0x42464c);
+    disc(pixels,stride,311,cy,26,action);
+    if(app->running) {
+        centered(pixels,stride,20,cy-11,88,"Lap",0xffffff);
+        fill(pixels,stride,304,cy-9,5,18,symbol);
+        fill(pixels,stride,313,cy-9,5,18,symbol);
+    } else {
+        centered(pixels,stride,20,cy-11,88,"Reset",0xffffff);
+        /* Point the triangle to the right. */
+        for(int x=0;x<17;x++) fill(pixels,stride,305+x,cy-(17-x)/2,1,17-x,symbol);
+    }
+    const char *modes[]={"Digital","Analog","Hybrid"};
+    small_centered(pixels,stride,263,modes[app->stopwatch_mode],MUTED);
+    for(int i=0;i<3;i++) disc(pixels,stride,177+i*10,292,3,i==app->stopwatch_mode?INK:MUTED);
+}
+static void draw_stopwatch(struct app *app,uint32_t *pixels,unsigned stride,int64_t now)
+{
+    int64_t ms=elapsed(app,now);
+    char value[64];
+    format_elapsed(value,sizeof value,ms);
+    if(app->stopwatch_mode==1) {
+        watch_dial(pixels,stride,187,139,106,(int)(ms/1000%60),true);
+        watch_hand(pixels,stride,187,139,49,(int)(ms/60000%60),MUTED);
+        centered(pixels,stride,110,177,154,value,INK);
+    } else if(app->stopwatch_mode==2) {
+        watch_dial(pixels,stride,78,78,37,(int)(ms/3600000%60),false);
+        watch_dial(pixels,stride,187,78,37,(int)(ms/60000%60),false);
+        watch_dial(pixels,stride,296,78,37,(int)(ms/1000%60),false);
+        stopwatch_digits(pixels,stride,120,value,INK);
+        fill(pixels,stride,30,219,315,1,MUTED);
+        int lastx=0,lasty=0;
+        unsigned count=app->lap_count<LAP_LIMIT?app->lap_count:LAP_LIMIT;
+        int64_t max=1;
+        for(unsigned i=0;i<count;i++) {
+            int64_t v=app->laps[i]-(i+1<count?app->laps[i+1]:0);
+            if(v>max) max=v;
+        }
+        for(unsigned i=0;i<count;i++) {
+            int64_t v=app->laps[i]-(i+1<count?app->laps[i+1]:0);
+            int x=46+(int)i*92,y=245-(int)(v*30/max);
+            if(lastx) segment(pixels,stride,lastx,lasty,x,y,0xff942b);
+            disc(pixels,stride,x,y,3,0xff942b);
+            lastx=x;lasty=y;
+        }
+    } else {
+        stopwatch_digits(pixels,stride,app->lap_count?40:84,value,INK);
+        unsigned count=app->lap_count<LAP_LIMIT?app->lap_count:LAP_LIMIT;
+        for(unsigned i=0;i<count;i++) {
+            char lap[48],num[32];
+            int64_t v=app->laps[i]-(i+1<count?app->laps[i+1]:0);
+            format_elapsed(num,sizeof num,v);
+            snprintf(lap,sizeof lap,"Lap %u",app->lap_count-i);
+            int y=122+(int)i*30;
+            fill(pixels,stride,20,y,335,1,blend(BG,INK,55));
+            draw_text(pixels,stride,25,y+4,lap,INK);
+            draw_text(pixels,stride,350-text_width(num),y+4,num,INK);
+        }
+    }
+    watch_controls(app,pixels,stride);
+}
+
 static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
 {
     char label[96],title[80];
@@ -2306,18 +2413,21 @@ static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
     int right=15+(int)((int64_t)345*(app->clip_start+app->clip_length)/app->clip_duration);
     if(right-left<3) right=left+3;
     if(right>360) { right=360; if(left>357) left=357; }
-    fill(pixels,stride,left,87,right-left,112,blend(BG,ACCENT,70));
+    fill(pixels,stride,left,87,right-left,112,blend(BG,0x377acb,80));
     if(app->clip_wave_ready) for(int i=0;i<80;i++) {
         int x=15+i*345/80;
         unsigned peak=0;
         for(int j=0;j<4;j++) if(app->clip_wave[i*4+j]>peak) peak=app->clip_wave[i*4+j];
         int height=2+(int)peak*100/255;
-        fill(pixels,stride,x,143-height/2,3,height,x>=left&&x<right?ACCENT:MUTED);
+        uint32_t bar=x>=left&&x<right?0x80baff:MUTED;
+        int top=143-height/2;
+        fill(pixels,stride,x,top,2,height,bar);
+        if(height>4) { disc(pixels,stride,x,top+1,1,bar); disc(pixels,stride,x,top+height-2,1,bar); }
     } else small_centered(pixels,stride,135,"Waveform unavailable",MUTED);
-    fill(pixels,stride,left,87,2,112,ACCENT);
-    fill(pixels,stride,right-2,87,2,112,ACCENT);
-    fill(pixels,stride,left,87,4,12,ACCENT);
-    fill(pixels,stride,right-4,187,4,12,ACCENT);
+    fill(pixels,stride,left,87,2,112,0x80baff);
+    fill(pixels,stride,right-2,87,2,112,0x80baff);
+    fill(pixels,stride,left,132,4,22,0x80baff);
+    fill(pixels,stride,right-4,132,4,22,0x80baff);
     if(app->clip_focus==0) outline(pixels,stride,15,85,345,116,app->clip_edit?ACCENT:INK);
     else if(app->clip_focus<3) outline(pixels,stride,app->clip_focus==2?202:12,205,161,27,app->clip_edit?ACCENT:INK);
     snprintf(label,sizeof label,"Start %d:%02d",app->clip_start/60,app->clip_start%60);
@@ -2326,12 +2436,20 @@ static void draw_clip(struct app *app,uint32_t *pixels,unsigned stride)
     snprintf(label,sizeof label,"End %d:%02d",end/60,end%60);
     draw_text_fitted(pixels,stride,210,209,150,label,INK);
     snprintf(label,sizeof label,"%d seconds%s",app->clip_length,app->clip_edit?"  /  Wheel adjusts":"");
-    small_centered(pixels,stride,233,app->clip_status<0?"Audio operation failed":app->clip_status==1?"Preview requested":app->clip_status==2?"Encoding MP3...":label,ACCENT);
+    small_centered(pixels,stride,233,app->clip_status<0?(app->clip_error[0]?app->clip_error:"Audio operation failed"):app->clip_status==1?"Preview requested":app->clip_status==2?"Preparing audio...":label,ACCENT);
     for(int i=0;i<2;i++) {
         int x=15+i*177;
-        fill(pixels,stride,x,253,168,43,i?ACCENT:SCHEME.fill);
-        if(app->clip_focus==i+3) outline(pixels,stride,x,253,168,43,INK);
-        centered(pixels,stride,x,263,168,i?"Save MP3":"Preview",i?0xffffffu:INK);
+        uint32_t color=i?0x2868be:0x35383e;
+        for(int row=0;row<43;row++) {
+            int inset=row<5?5-row:row>37?row-37:0;
+            fill(pixels,stride,x+inset,253+row,168-2*inset,1,color);
+        }
+        if(app->clip_focus==i+3) {
+            fill(pixels,stride,x+8,253,152,2,0x80baff);
+            fill(pixels,stride,x+8,294,152,2,0x80baff);
+        }
+        if(!i) for(int j=0;j<10;j++) fill(pixels,stride,x+30+j,274-(10-j)/2,1,10-j,0xffffff);
+        centered(pixels,stride,x+(i?0:12),263,168-(i?0:12),i?"Save MP3":"Preview",0xffffff);
     }
 }
 void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, time_t utc, const struct tm *today)
@@ -2390,19 +2508,9 @@ void app_draw(struct app *app, uint32_t *pixels, unsigned stride, int64_t now, t
         }
         break;
     }
-    case STOPWATCH: {
-        /* Native-resolution stopwatch numerals. */
-        format_elapsed(value, sizeof value, elapsed(app, now));
-        stopwatch_digits(pixels, stride, app->lap_count ? 44 : 70, value, ACCENT);
-        for (unsigned i = 0; i < app->lap_count && i < LAP_LIMIT; ++i) {
-            char time[32];
-            format_elapsed(time, sizeof time, app->laps[i]);
-            snprintf(value, sizeof value, "Lap %u  %s", app->lap_count - i, time);
-            small_line(pixels, stride, 12 + (int)(i % 2) * 176, 140 + (int)(i / 2) * 20,
-                       175, value, i ? MUTED : INK);
-        }
-        break;
-    }
+    case STOPWATCH:
+        draw_stopwatch(app,pixels,stride,now);
+        return;
     case CALENDAR:
         draw_calendar(app, pixels, stride, today);
         break;

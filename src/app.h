@@ -24,6 +24,7 @@ struct app {
     int64_t wheel_at;
     bool quit;
     int touch_button;
+    int stopwatch_mode;
     bool running;
     int64_t started, elapsed, laps[LAP_LIMIT];
     unsigned lap_count;
@@ -53,6 +54,7 @@ struct app {
     char clip_path[512];
     unsigned char clip_wave[320];
     char clip_title[80];
+    char clip_error[96];
     ExtraTools extra;
 };
 

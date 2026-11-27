@@ -158,7 +158,7 @@ int main(int argc, char **argv)
         }
         if (!can_pan)
             app_draw(&app, memory + visible * stride, stride, now, date, &today);
-        int timeout = app.screen == STOPWATCH && app.running ? 100 : 1000;
+        int timeout = app.screen == STOPWATCH && app.running ? 50 : 1000;
         if (app.screen == COUNTDOWN && app.extra.countdown.running) {
             /* The display shows whole seconds: redraw at the next boundary. */
             int64_t left = app.extra.countdown.due_ms - now;
