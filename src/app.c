@@ -2273,7 +2273,7 @@ static void draw_timer(struct app *app,uint32_t *pixels,unsigned stride,int64_t 
         clip_round(pixels,stride,x,218,150,54,27,bg);
         centered(pixels,stride,x,234,150,labels[k],fg);
     }
-    if(!active) small_centered(pixels,stride,287,"Return: When Timer Ends",MUTED);
+
 }
 
 
