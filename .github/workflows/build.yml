@@ -40,7 +40,15 @@ jobs:
           unzip -t dist/.utilities-app.zip
           unzip -p dist/.utilities-app.zip .utilities-app/q2app | grep -Fx 'name=Utilities'
           unzip -p dist/.utilities-app.zip .utilities-app/q2app | grep -Fx 'row=library'
-          test "$(unzip -Z1 dist/.utilities-app.zip | sort)" = "$(printf '%s\n' .utilities-app/q2-utilities-app .utilities-app/q2app .utilities-app/run | sort)"
+          test "$(unzip -Z1 dist/.utilities-app.zip | sort)" = "$(printf '%s\n' .utilities-app/q2-utilities-app .utilities-app/q2app .utilities-app/run .utilities-app/icon.png .utilities-app/icon-40.png .utilities-app/pane.png | sort)"
+          python3 - <<'PY'
+          import struct, zipfile
+          with zipfile.ZipFile("dist/.utilities-app.zip") as z:
+              for name, size in (("icon.png", 52), ("icon-40.png", 40), ("pane.png", 96)):
+                  data = z.read(".utilities-app/" + name)
+                  assert data[:8] == b"\x89PNG\r\n\x1a\n"
+                  assert struct.unpack(">IIBB", data[16:26]) == (size, size, 8, 6)
+          PY
           file dist/.utilities-app/q2-utilities-app | grep -E 'ELF 32-bit LSB.*MIPS'
       - uses: actions/upload-artifact@v6
         with:

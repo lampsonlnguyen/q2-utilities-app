@@ -5,6 +5,7 @@ CFLAGS ?= -O2 -Wall -Wextra -Werror
 Q2_FLAGS = --target=mipsel-linux-gnu --sysroot="$(SYSROOT)" -march=mips32r2 -mabi=32 -mfp64 -mnan=2008 -mabs=2008
 Q2_OBJECTS = build/q2/app.o build/q2/platform_q2.o build/q2/browse.o build/q2/crt-q2.o build/q2/q2pod_scheme.o build/q2/worldclock.o build/q2/extra_tools.o
 CARD = dist/.utilities-app
+ICONS = $(CARD)/icon.png $(CARD)/icon-40.png $(CARD)/pane.png
 
 all: dist/.utilities-app.zip
 
@@ -35,8 +36,11 @@ $(CARD)/run: run
 	cp $< $@
 	chmod 755 $@
 
-dist/.utilities-app.zip: $(CARD)/q2-utilities-app $(CARD)/q2app $(CARD)/run
-	cd dist && rm -f .utilities-app.zip && zip -q .utilities-app.zip .utilities-app/q2app .utilities-app/q2-utilities-app .utilities-app/run
+$(ICONS) &: tools/icons.py
+	python3 tools/icons.py $(CARD)
+
+dist/.utilities-app.zip: $(CARD)/q2-utilities-app $(CARD)/q2app $(CARD)/run $(ICONS)
+	cd dist && rm -f .utilities-app.zip && zip -q .utilities-app.zip .utilities-app/q2app .utilities-app/q2-utilities-app .utilities-app/run .utilities-app/icon.png .utilities-app/icon-40.png .utilities-app/pane.png
 
 build/host/check: tests/check.c src/app.c src/q2pod_scheme.c src/worldclock.c src/extra_tools.c src/app.h src/q2pod_scheme.h src/worldclock.h src/extra_tools.h src/utility_icons.h src/font.h src/stopwatch_digits.h
 	mkdir -p $(@D)
