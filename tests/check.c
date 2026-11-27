@@ -49,8 +49,12 @@ static void stopwatch(void)
         for (int x = 0; x < WIDTH; ++x)
             ink += pixels[x * HEIGHT + HEIGHT - 1 - y] != paper;
     assert(ink > 50);
-    send("w -100", 2800);
-    assert(app.stopwatch_mode!=0 && app.elapsed==2300);
+    /* One configured wheel detent changes exactly one display mode. */
+    app.wheel=0;
+    send("w -28", 2800);
+    assert(app.stopwatch_mode==1 && app.elapsed==2300);
+    send("w -28", 2810);
+    assert(app.stopwatch_mode==2 && app.elapsed==2300);
     tap(311, 282, 3000);
     tap(311, 282, 3200);
     assert(app.elapsed == 2500);
